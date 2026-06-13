@@ -409,8 +409,8 @@ function HistoryPanel({
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
-    <div className="flex max-h-[40%] shrink-0 flex-col border-b border-border/60 bg-muted/30 animate-in slide-in-from-top-1 duration-150">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex max-h-[40%] shrink-0 flex-col overflow-hidden border-b border-border/60 bg-muted/30 animate-in slide-in-from-top-1 duration-150">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {sorted.map((s) => (
           <button
             key={s.id}
