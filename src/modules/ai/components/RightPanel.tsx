@@ -30,7 +30,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo } from "react";
 import { estimateCost, getModel, getModelContextLimit, type ModelId } from "../config";
 import type { SessionMeta } from "../lib/sessions";
-import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -38,6 +37,7 @@ import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { AiComposerInput } from "./AiComposerInput";
+import { ModelDropdown } from "./AiStatusBarControls";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 
@@ -112,7 +112,6 @@ function Body({
         step={step}
         isBusy={isBusy}
         onClose={onClose}
-        messages={helpers.messages}
       />
 
       <PlanModeStrip />
@@ -139,6 +138,13 @@ function Body({
       {/* AI Composer Input — moved from WorkspaceInputBar */}
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
         <AiComposerInput />
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ContextIndicator messages={helpers.messages} />
+            <AgentSwitcher />
+          </div>
+          <ModelDropdown />
+        </div>
       </div>
     </>
   );
@@ -183,31 +189,22 @@ function Header({
   step,
   isBusy,
   onClose,
-  messages,
 }: {
   step: string | null;
   isBusy: boolean;
   onClose: () => void;
-  messages?: UIMessage[];
 }) {
-  const customAgents = useAgentsStore((s) => s.customAgents);
-  void customAgents;
-
   return (
     <div className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
       <div className="flex min-w-0 items-center gap-1.5">
-        <AgentSwitcher isMiniWindow />
-        {messages !== undefined ? (
-          <ContextIndicator messages={messages} />
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
         {isBusy ? (
           <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
             <Spinner className="size-2.5" />
             <span className="max-w-32 truncate">{step ?? "Thinking…"}</span>
           </span>
         ) : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
         <SessionPicker />
         <Button
           type="button"

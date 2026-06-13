@@ -150,8 +150,6 @@ export function AiStatusBarControls() {
         </IconBtn>
       )}
 
-      <ModelDropdown />
-
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <Button
         onClick={closeRightPanel}
@@ -197,7 +195,7 @@ export function AiStatusBarControls() {
 
 type Tab = "all" | "favorites" | "recent";
 
-function ModelDropdown() {
+export function ModelDropdown() {
   const selected = useChatStore((s) => s.selectedModelId);
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setSelected = useChatStore((s) => s.setSelectedModelId);

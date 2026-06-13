@@ -2,13 +2,12 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { usePresence } from "@/lib/usePresence";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { AgentSwitcher } from "./AgentSwitcher";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
 
@@ -79,9 +78,26 @@ export function AiComposerInput() {
     return () => window.clearTimeout(t);
   }, [fileTrigger]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     autoresize(c.textareaRef.current);
   }, [c.value, c.textareaRef]);
+
+  // Re-run autoresize when the textarea width changes (panel open/collapse,
+  // window resize) so placeholder-wrapping-based scrollHeight is recalculated.
+  const prevWidthRef = useRef(0);
+  useLayoutEffect(() => {
+    const el = c.textareaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (w !== prevWidthRef.current) {
+        prevWidthRef.current = w;
+        autoresize(el);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [c.textareaRef]);
 
   const updateTrigger = () => {
     const el = c.textareaRef.current;
@@ -211,7 +227,10 @@ export function AiComposerInput() {
         <PopoverAnchor asChild>
           <div className="flex items-start gap-2">
             <textarea
-              ref={c.textareaRef}
+              ref={(el) => {
+                (c.textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+                if (el) autoresize(el);
+              }}
               value={c.value}
               onChange={(e) => c.setValue(e.target.value)}
               onKeyUp={updateTrigger}
@@ -260,11 +279,10 @@ export function AiComposerInput() {
               placeholder="Ask Terax anything   -   # for snippets and commands, @ for files"
               rows={1}
               className={cn(
-                "max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
+                "min-h-[5rem] max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
                 "placeholder:text-muted-foreground/60",
               )}
             />
-            <AgentSwitcher />
           </div>
         </PopoverAnchor>
         {fileTrigger ? (
@@ -305,8 +323,11 @@ export function AiComposerInput() {
   );
 }
 
+const AUTORESIZE_MIN = 80;
+const AUTORESIZE_MAX = 160;
+
 function autoresize(el: HTMLTextAreaElement | null) {
   if (!el) return;
   el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  el.style.height = `${Math.max(AUTORESIZE_MIN, Math.min(el.scrollHeight, AUTORESIZE_MAX))}px`;
 }
