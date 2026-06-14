@@ -15,7 +15,6 @@ import {
   MODELS,
   PROVIDERS,
   compatModelIdForEndpoint,
-  getAutocompleteEligibleModels,
   getModel,
   getProvider,
   providerNeedsKey,
@@ -610,29 +609,22 @@ function AutocompleteRow({
   const enabled = usePreferencesStore((s) => s.autocompleteEnabled);
   const provider = usePreferencesStore((s) => s.autocompleteProvider);
   const modelId = usePreferencesStore((s) => s.autocompleteModelId);
-  const eligible = useMemo(() => getAutocompleteEligibleModels(), []);
 
-  // Fast cloud tiers + any configured local provider (one model id each).
   const items = useMemo(() => {
-    const local = PROVIDERS.filter(
-      (p) => isLocalProvider(p.id) && configuredIds.has(p.id),
-    ).flatMap((p) => {
-      const m = MODELS.find((x) => x.provider === p.id);
-      return m ? [m] : [];
-    });
-    return [...eligible, ...local];
-  }, [eligible, configuredIds]);
+    return MODELS.filter((m) => configuredIds.has(m.provider));
+  }, [configuredIds]);
 
   const currentModel = useMemo(() => {
+    const fallback = items[0] ?? MODELS[0];
     if (isLocalProvider(provider)) {
-      return MODELS.find((m) => m.provider === provider) ?? eligible[0];
+      return MODELS.find((m) => m.provider === provider) ?? fallback;
     }
     return (
       MODELS.find((m) => m.provider === provider && m.id === modelId) ??
       MODELS.find((m) => m.id === modelId) ??
-      eligible[0]
+      fallback
     );
-  }, [eligible, provider, modelId]);
+  }, [items, provider, modelId]);
 
   const setModel = (id: string, providerId: ProviderId) => {
     void setAutocompleteProvider(providerId);

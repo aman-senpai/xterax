@@ -163,15 +163,6 @@ export function getProvider(id: ProviderId): ProviderInfo {
   return p;
 }
 
-/** 1 (lowest) – 5 (highest). For `cost`, higher = cheaper. */
-export type CapabilityScore = 1 | 2 | 3 | 4 | 5;
-
-export type ModelCapabilities = {
-  intelligence: CapabilityScore;
-  speed: CapabilityScore;
-  cost: CapabilityScore;
-};
-
 export type ModelTag = "vision" | "reasoning" | "tools" | "coding";
 
 export type ModelInfo = {
@@ -182,7 +173,6 @@ export type ModelInfo = {
   hint: string;
   /** One-line marketing-style description shown under the label. */
   description: string;
-  capabilities: ModelCapabilities;
   tags?: readonly ModelTag[];
 };
 
@@ -194,7 +184,6 @@ export const MODELS = [
     label: "GPT-5.5",
     hint: "Flagship",
     description: "Frontier reasoning and code.",
-    capabilities: { intelligence: 5, speed: 3, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {
@@ -203,7 +192,6 @@ export const MODELS = [
     label: "GPT-5.4 mini",
     hint: "Fast",
     description: "Snappy default at low cost.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["vision", "tools"],
   },
   {
@@ -212,7 +200,6 @@ export const MODELS = [
     label: "GPT-5.4 nano",
     hint: "Fastest",
     description: "Tiny and instant — great for autocomplete.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools"],
   },
   {
@@ -221,7 +208,6 @@ export const MODELS = [
     label: "GPT-5.3 Codex",
     hint: "Coding",
     description: "Tuned for code and tool use.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
     tags: ["tools", "coding"],
   },
   {
@@ -230,7 +216,6 @@ export const MODELS = [
     label: "GPT-4.1 mini",
     hint: "Cheap",
     description: "Ultra-cheap workhorse for bulk tasks.",
-    capabilities: { intelligence: 3, speed: 4, cost: 5 },
     tags: ["vision", "tools"],
   },
 
@@ -241,7 +226,6 @@ export const MODELS = [
     label: "Claude Opus 4.7",
     hint: "Best",
     description: "Anthropic's flagship for long reasoning.",
-    capabilities: { intelligence: 5, speed: 2, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {
@@ -250,7 +234,6 @@ export const MODELS = [
     label: "Claude Sonnet 4.6",
     hint: "Balanced",
     description: "Sweet spot of quality and speed.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
     tags: ["vision", "tools", "coding"],
   },
   {
@@ -259,7 +242,6 @@ export const MODELS = [
     label: "Claude Haiku 4.5",
     hint: "Fast",
     description: "Quick, cheap, multimodal.",
-    capabilities: { intelligence: 3, speed: 5, cost: 4 },
     tags: ["vision", "tools"],
   },
   {
@@ -268,7 +250,6 @@ export const MODELS = [
     label: "Claude Opus 4.6",
     hint: "Legacy",
     description: "Previous-gen Opus.",
-    capabilities: { intelligence: 5, speed: 2, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
 
@@ -279,7 +260,6 @@ export const MODELS = [
     label: "Gemini 3.5 Flash",
     hint: "Fast",
     description: "High-intelligence, extremely fast multimodal model.",
-    capabilities: { intelligence: 4, speed: 5, cost: 4 },
     tags: ["vision", "tools", "coding"],
   },
   {
@@ -288,7 +268,6 @@ export const MODELS = [
     label: "Gemini 3.1 Flash-Lite",
     hint: "Lite",
     description: "Extremely fast, cheap, and lightweight multimodal model.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["vision", "tools"],
   },
   {
@@ -297,7 +276,6 @@ export const MODELS = [
     label: "Gemini 3.1 Pro",
     hint: "Flagship",
     description: "Strong reasoning, 1M context.",
-    capabilities: { intelligence: 5, speed: 3, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {
@@ -306,7 +284,6 @@ export const MODELS = [
     label: "Gemini 3 Flash",
     hint: "Fast",
     description: "Fast multimodal, 1M context.",
-    capabilities: { intelligence: 4, speed: 5, cost: 4 },
     tags: ["vision", "tools"],
   },
   {
@@ -315,7 +292,6 @@ export const MODELS = [
     label: "Gemini 2.5 Pro",
     hint: "Stable",
     description: "Production-stable Gemini.",
-    capabilities: { intelligence: 4, speed: 3, cost: 3 },
     tags: ["vision", "tools", "coding"],
   },
   {
@@ -324,7 +300,6 @@ export const MODELS = [
     label: "Gemini 2.5 Flash",
     hint: "Cheap",
     description: "Bulk throughput at low cost.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["vision", "tools"],
   },
 
@@ -335,7 +310,6 @@ export const MODELS = [
     label: "Grok 4.20 Reasoning",
     hint: "Reasoning",
     description: "Frontier reasoning with extended thinking.",
-    capabilities: { intelligence: 5, speed: 2, cost: 2 },
     tags: ["reasoning", "tools", "coding"],
   },
   {
@@ -344,7 +318,6 @@ export const MODELS = [
     label: "Grok 4.20",
     hint: "Fast",
     description: "Fast tier for chat and tools.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
     tags: ["tools"],
   },
   {
@@ -353,7 +326,6 @@ export const MODELS = [
     label: "Grok 4 Fast",
     hint: "Reasoning",
     description: "Cheaper Grok 4 with vision and reasoning.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["vision", "reasoning", "tools"],
   },
 
@@ -364,7 +336,6 @@ export const MODELS = [
     label: "DeepSeek V4 Pro",
     hint: "Best",
     description: "Strong open-weight code model.",
-    capabilities: { intelligence: 5, speed: 3, cost: 4 },
     tags: ["reasoning", "tools", "coding"],
   },
   {
@@ -373,7 +344,6 @@ export const MODELS = [
     label: "DeepSeek V4 Flash",
     hint: "Fast",
     description: "Cheap and fast everyday tier.",
-    capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["reasoning", "tools"],
   },
   {
@@ -382,7 +352,6 @@ export const MODELS = [
     label: "DeepSeek Reasoner",
     hint: "Thinking",
     description: "Chain-of-thought at open-weight prices.",
-    capabilities: { intelligence: 5, speed: 2, cost: 4 },
     tags: ["reasoning", "coding"],
   },
 
@@ -393,7 +362,6 @@ export const MODELS = [
     label: "Mistral Large 3",
     hint: "Best",
     description: "Flagship Mistral model with 128K context.",
-    capabilities: { intelligence: 5, speed: 3, cost: 3 },
     tags: ["vision", "tools", "coding"],
   },
   {
@@ -402,7 +370,6 @@ export const MODELS = [
     label: "Mistral Medium 3.5",
     hint: "Balanced",
     description: "Good balance of speed and intelligence.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["vision", "tools"],
   },
   {
@@ -411,7 +378,6 @@ export const MODELS = [
     label: "Codestral",
     hint: "Code",
     description: "Purpose-built coding model from Mistral.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["coding"],
   },
 
@@ -422,7 +388,6 @@ export const MODELS = [
     label: "GPT-OSS 120B",
     hint: "Ultra-fast",
     description: "Fastest inference on Cerebras silicon.",
-    capabilities: { intelligence: 4, speed: 5, cost: 4 },
     tags: ["tools", "coding"],
   },
   {
@@ -431,7 +396,6 @@ export const MODELS = [
     label: "Llama 3.3 70B",
     hint: "Fast",
     description: "Meta's open model on wafer-scale silicon.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools"],
   },
   {
@@ -440,7 +404,6 @@ export const MODELS = [
     label: "Qwen 3 32B",
     hint: "Fast",
     description: "Multilingual model at extreme speed.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools", "coding"],
   },
 
@@ -451,7 +414,6 @@ export const MODELS = [
     label: "GPT-OSS 20B",
     hint: "Ultra-fast",
     description: "Sub-second responses on Groq LPU.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools", "coding"],
   },
   {
@@ -460,7 +422,6 @@ export const MODELS = [
     label: "Llama 3.3 70B",
     hint: "Versatile",
     description: "Fast and broadly capable.",
-    capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["tools"],
   },
   {
@@ -469,7 +430,6 @@ export const MODELS = [
     label: "DeepSeek R1 Distill 70B",
     hint: "Thinking",
     description: "Reasoning-distilled Llama on Groq.",
-    capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["reasoning", "tools"],
   },
 
@@ -480,7 +440,6 @@ export const MODELS = [
     label: "OpenRouter",
     hint: "Configurable",
     description: "Any model on OpenRouter by id.",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
   // ── Generic OpenAI-compatible (user-defined endpoint) ─────────────────────
@@ -490,7 +449,6 @@ export const MODELS = [
     label: "Custom endpoint",
     hint: "Configurable",
     description: "Any OpenAI-compatible endpoint.",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
   // ── LM Studio (local; model id is user-supplied at runtime) ───────────────
@@ -500,7 +458,6 @@ export const MODELS = [
     label: "LM Studio",
     hint: "Local",
     description: "Local GGUF models via LM Studio.",
-    capabilities: { intelligence: 3, speed: 3, cost: 5 },
   },
 
   // ── MLX (local; Apple-silicon; model id is user-supplied at runtime) ──────
@@ -510,7 +467,6 @@ export const MODELS = [
     label: "MLX",
     hint: "Local",
     description: "Apple-silicon models via mlx_lm.server.",
-    capabilities: { intelligence: 3, speed: 3, cost: 5 },
   },
 
   // ── Ollama (local; model id is user-supplied at runtime) ──────────────────
@@ -520,7 +476,6 @@ export const MODELS = [
     label: "Ollama",
     hint: "Local",
     description: "Local models via Ollama.",
-    capabilities: { intelligence: 3, speed: 3, cost: 5 },
   },
 ] as const satisfies readonly ModelInfo[];
 
@@ -539,7 +494,6 @@ export function getCompatModelInfo(
     label: ep?.modelId || name,
     hint: name,
     description: ep ? `${name} — ${ep.baseURL}` : "Custom OpenAI-compatible endpoint",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
   };
 }
 
@@ -712,13 +666,6 @@ export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
   openrouter: "openai/gpt-5.4-mini",
   "openai-compatible": "",
 };
-
-/** Curated list of fast models suitable for inline completion (speed ≥ 4). */
-export function getAutocompleteEligibleModels(): readonly ModelInfo[] {
-  return MODELS.filter(
-    (m) => m.capabilities.speed >= 4 && m.id !== "openai-compatible-custom",
-  );
-}
 
 export const LMSTUDIO_DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const MLX_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1";
