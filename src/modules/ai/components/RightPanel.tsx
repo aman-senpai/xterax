@@ -29,6 +29,7 @@ import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { AiComposerInput } from "./AiComposerInput";
 import { ModelDropdown } from "./AiStatusBarControls";
+import { ThinkingModeDropdown } from "./ThinkingModeDropdown";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 
@@ -154,7 +155,10 @@ function Body({ sessionId }: { sessionId: string }) {
             <ContextIndicator messages={helpers.messages} />
             <AgentSwitcher />
           </div>
-          <ModelDropdown />
+          <div className="flex items-center gap-1">
+            <ThinkingModeDropdown />
+            <ModelDropdown />
+          </div>
         </div>
       </div>
     </>

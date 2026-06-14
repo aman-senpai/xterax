@@ -190,6 +190,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
               mlxBaseURL: s.mlxBaseURL,
               ollamaBaseURL: s.ollamaBaseURL,
               openaiCompatibleBaseURL: s.openaiCompatibleBaseURL,
+              thinkingLevel: s.autocompleteThinkingLevel,
             };
           },
           getPath: () => pathRef.current,

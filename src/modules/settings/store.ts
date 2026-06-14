@@ -11,6 +11,10 @@ import {
   type CustomEndpoint,
   type ModelId,
 } from "@/modules/ai/config";
+import {
+  DEFAULT_THINKING_LEVEL,
+  type ThinkingLevel,
+} from "@/modules/ai/lib/thinking";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -57,6 +61,7 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   defaultModelId: ModelId;
+  defaultThinkingLevel: ThinkingLevel;
   editorTheme: EditorThemeId;
   customInstructions: string;
   autostart: boolean;
@@ -64,6 +69,7 @@ export type Preferences = {
   autocompleteEnabled: boolean;
   autocompleteProvider: AutocompleteProviderId;
   autocompleteModelId: string;
+  autocompleteThinkingLevel: ThinkingLevel;
   lmstudioBaseURL: string;
   lmstudioModelId: string;
   mlxBaseURL: string;
@@ -102,6 +108,7 @@ const KEY_BG_IMAGE_ID = "backgroundImageId";
 const KEY_BG_OPACITY = "backgroundOpacity";
 const KEY_BG_BLUR = "backgroundBlur";
 const KEY_DEFAULT_MODEL = "defaultModelId";
+const KEY_DEFAULT_THINKING_LEVEL = "defaultThinkingLevel";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
 const KEY_AUTOSTART = "autostart";
@@ -109,6 +116,7 @@ const KEY_RESTORE_WINDOW = "restoreWindowState";
 const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
 const KEY_AUTOCOMPLETE_PROVIDER = "autocompleteProvider";
 const KEY_AUTOCOMPLETE_MODEL = "autocompleteModelId";
+const KEY_AUTOCOMPLETE_THINKING_LEVEL = "autocompleteThinkingLevel";
 const KEY_LMSTUDIO_BASE_URL = "lmstudioBaseURL";
 const KEY_LMSTUDIO_MODEL_ID = "lmstudioModelId";
 const KEY_MLX_BASE_URL = "mlxBaseURL";
@@ -162,6 +170,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundOpacity: 0.5,
   backgroundBlur: 0,
   defaultModelId: DEFAULT_MODEL_ID,
+  defaultThinkingLevel: DEFAULT_THINKING_LEVEL,
   editorTheme: "atomone",
   customInstructions: "",
   autostart: false,
@@ -169,6 +178,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autocompleteEnabled: false,
   autocompleteProvider: "cerebras",
   autocompleteModelId: DEFAULT_AUTOCOMPLETE_MODEL.cerebras ?? "",
+  autocompleteThinkingLevel: "low",
   lmstudioBaseURL: LMSTUDIO_DEFAULT_BASE_URL,
   lmstudioModelId: "",
   mlxBaseURL: MLX_DEFAULT_BASE_URL,
@@ -239,6 +249,9 @@ export async function loadPreferences(): Promise<Preferences> {
         ? stored
         : DEFAULT_PREFERENCES.defaultModelId;
     })(),
+    defaultThinkingLevel:
+      get<ThinkingLevel>(KEY_DEFAULT_THINKING_LEVEL) ??
+      DEFAULT_PREFERENCES.defaultThinkingLevel,
     editorTheme:
       get<EditorThemeId>(KEY_EDITOR_THEME) ?? DEFAULT_PREFERENCES.editorTheme,
     customInstructions:
@@ -257,6 +270,9 @@ export async function loadPreferences(): Promise<Preferences> {
     autocompleteModelId:
       get<string>(KEY_AUTOCOMPLETE_MODEL) ??
       DEFAULT_PREFERENCES.autocompleteModelId,
+    autocompleteThinkingLevel:
+      get<ThinkingLevel>(KEY_AUTOCOMPLETE_THINKING_LEVEL) ??
+      DEFAULT_PREFERENCES.autocompleteThinkingLevel,
     lmstudioBaseURL:
       get<string>(KEY_LMSTUDIO_BASE_URL) ?? DEFAULT_PREFERENCES.lmstudioBaseURL,
     lmstudioModelId:
@@ -388,6 +404,12 @@ export async function setDefaultModel(value: ModelId): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
 }
 
+export async function setDefaultThinkingLevel(
+  value: ThinkingLevel,
+): Promise<void> {
+  await writePref(KEY_DEFAULT_THINKING_LEVEL, value);
+}
+
 export async function setEditorTheme(value: EditorThemeId): Promise<void> {
   await writePref(KEY_EDITOR_THEME, value);
 }
@@ -416,6 +438,12 @@ export async function setAutocompleteProvider(
 
 export async function setAutocompleteModelId(value: string): Promise<void> {
   await writePref(KEY_AUTOCOMPLETE_MODEL, value);
+}
+
+export async function setAutocompleteThinkingLevel(
+  value: ThinkingLevel,
+): Promise<void> {
+  await writePref(KEY_AUTOCOMPLETE_THINKING_LEVEL, value);
 }
 
 export async function setLmstudioBaseURL(value: string): Promise<void> {
@@ -577,6 +605,7 @@ export async function onPreferencesChange(
     [KEY_BG_OPACITY]: "backgroundOpacity",
     [KEY_BG_BLUR]: "backgroundBlur",
     [KEY_DEFAULT_MODEL]: "defaultModelId",
+    [KEY_DEFAULT_THINKING_LEVEL]: "defaultThinkingLevel",
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
     [KEY_AUTOSTART]: "autostart",
@@ -584,6 +613,7 @@ export async function onPreferencesChange(
     [KEY_AUTOCOMPLETE_ENABLED]: "autocompleteEnabled",
     [KEY_AUTOCOMPLETE_PROVIDER]: "autocompleteProvider",
     [KEY_AUTOCOMPLETE_MODEL]: "autocompleteModelId",
+    [KEY_AUTOCOMPLETE_THINKING_LEVEL]: "autocompleteThinkingLevel",
     [KEY_LMSTUDIO_BASE_URL]: "lmstudioBaseURL",
     [KEY_LMSTUDIO_MODEL_ID]: "lmstudioModelId",
     [KEY_MLX_BASE_URL]: "mlxBaseURL",

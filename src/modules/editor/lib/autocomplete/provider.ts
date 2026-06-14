@@ -5,6 +5,11 @@ import {
 } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
+import {
+  buildThinkingProviderOptions,
+  DEFAULT_THINKING_LEVEL,
+  type ThinkingLevel,
+} from "@/modules/ai/lib/thinking";
 import { generateText } from "ai";
 import {
   buildUserPrompt,
@@ -20,6 +25,7 @@ export type CompletionDeps = {
   mlxBaseURL?: string;
   ollamaBaseURL?: string;
   openaiCompatibleBaseURL?: string;
+  thinkingLevel?: ThinkingLevel;
 };
 
 const MAX_OUTPUT_TOKENS_DEFAULT = 128;
@@ -48,24 +54,21 @@ export async function requestCompletion(
     openaiCompatibleBaseURL: deps.openaiCompatibleBaseURL,
   });
 
+  // Some reasoning models need a higher output token budget to leave room for
+  // internal thought before the visible completion text.
   const isReasoning = /\bgpt-oss\b/i.test(modelId);
   const isDeepSeek = deps.provider === "deepseek";
-
-  const maxOutputTokens = isReasoning
+  const maxOutputTokens = isReasoning || isDeepSeek
     ? MAX_OUTPUT_TOKENS_REASONING
-    : isDeepSeek
-      ? MAX_OUTPUT_TOKENS_REASONING
-      : MAX_OUTPUT_TOKENS_DEFAULT;
+    : MAX_OUTPUT_TOKENS_DEFAULT;
 
-  const providerOptions: Record<string, Record<string, string | Record<string, string>>> = {};
-  if (isReasoning) {
-    providerOptions.cerebras = { reasoningEffort: "low" };
-    providerOptions.groq = { reasoningEffort: "low" };
-    providerOptions.openai = { reasoningEffort: "low" };
-  }
-  if (isDeepSeek) {
-    providerOptions.deepseek = { thinking: { type: "disabled" } };
-  }
+  // Use the user's stored thinking level preference. DeepSeek thinking is
+  // always disabled for autocomplete — it burns output tokens on internal
+  // reasoning before producing any visible text.
+  const thinkingLevel = deps.provider === "deepseek"
+    ? ("off" as const)
+    : (deps.thinkingLevel ?? DEFAULT_THINKING_LEVEL);
+  const providerOptions = buildThinkingProviderOptions(deps.provider, thinkingLevel, modelId);
 
   const { text } = await generateText({
     model,
@@ -75,7 +78,7 @@ export async function requestCompletion(
     maxRetries: 0,
     abortSignal: signal,
     temperature: 0.2,
-    ...(Object.keys(providerOptions).length ? { providerOptions } : {}),
+    ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
   });
 
   return cleanCompletion(text);

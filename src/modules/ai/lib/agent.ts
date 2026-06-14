@@ -23,6 +23,11 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
+import {
+  buildThinkingProviderOptions,
+  DEFAULT_THINKING_LEVEL,
+  type ThinkingLevel,
+} from "./thinking";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -386,6 +391,7 @@ export type RunAgentOptions = {
   projectMemory?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
+  thinkingLevel?: ThinkingLevel;
 };
 
 export async function runAgentStream(opts: RunAgentOptions) {
@@ -442,6 +448,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
 
+  const thinkingLevel = opts.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
+  const thinkingProviderOptions = buildThinkingProviderOptions(provider, thinkingLevel, modelId);
+
   let stepsSeen = 0;
   return streamText({
     model,
@@ -449,6 +458,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     tools: buildTools(opts.toolContext),
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
+    ...(Object.keys(thinkingProviderOptions).length > 0
+      ? { providerOptions: thinkingProviderOptions }
+      : {}),
     onStepFinish: (step) => {
       stepsSeen++;
       if (opts.onStep) {

@@ -25,6 +25,7 @@ export function useAiBootstrap(): {
   const setApiKeys = useChatStore((s) => s.setApiKeys);
   const setCustomEndpointKeys = useChatStore((s) => s.setCustomEndpointKeys);
   const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
+  const setThinkingLevel = useChatStore((s) => s.setThinkingLevel);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
 
@@ -86,6 +87,7 @@ export function useAiBootstrap(): {
   // into chatStore so the dropdown reflects what the user picked in Settings.
   const initPrefs = usePreferencesStore((s) => s.init);
   const prefDefaultModel = usePreferencesStore((s) => s.defaultModelId);
+  const prefDefaultThinkingLevel = usePreferencesStore((s) => s.defaultThinkingLevel);
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
@@ -93,6 +95,10 @@ export function useAiBootstrap(): {
     if (!prefsHydrated) return;
     setSelectedModelId(prefDefaultModel);
   }, [prefsHydrated, prefDefaultModel, setSelectedModelId]);
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    setThinkingLevel(prefDefaultThinkingLevel);
+  }, [prefsHydrated, prefDefaultThinkingLevel, setThinkingLevel]);
 
   useEffect(() => {
     void hydrateSessions();

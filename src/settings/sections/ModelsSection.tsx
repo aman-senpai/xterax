@@ -35,12 +35,19 @@ import {
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  getThinkingLevels,
+  supportsThinkingLevel,
+  type ThinkingLevel,
+} from "@/modules/ai/lib/thinking";
+import {
   emitKeysChanged,
   setAutocompleteEnabled,
   setAutocompleteModelId,
   setAutocompleteProvider,
+  setAutocompleteThinkingLevel,
   setCustomEndpoints,
   setDefaultModel,
+  setDefaultThinkingLevel,
   setFavoriteModelIds,
   setLmstudioBaseURL,
   setLmstudioModelId,
@@ -58,9 +65,11 @@ import {
   Add01Icon,
   ArrowDown01Icon,
   ArrowUpRight01Icon,
+  BrainIcon,
   Cancel01Icon,
   CheckmarkCircle02Icon,
   ChevronDown,
+  Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -509,6 +518,8 @@ function DefaultsBlock({
   configuredIds: Set<ProviderId>;
   keys: KeysMap;
 }) {
+  const defaultThinkingLevel = usePreferencesStore((s) => s.defaultThinkingLevel);
+
   return (
     <div className="flex flex-col gap-3">
       <Label>Defaults</Label>
@@ -516,6 +527,7 @@ function DefaultsBlock({
         <FieldRow label="Chat model">
           <DefaultModelPicker
             defaultModel={defaultModel}
+            defaultThinkingLevel={defaultThinkingLevel}
             configuredIds={configuredIds}
           />
         </FieldRow>
@@ -527,75 +539,136 @@ function DefaultsBlock({
 
 function DefaultModelPicker({
   defaultModel,
+  defaultThinkingLevel,
   configuredIds,
 }: {
   defaultModel: ModelId;
+  defaultThinkingLevel: ThinkingLevel;
   configuredIds: Set<ProviderId>;
 }) {
   const m = getModel(defaultModel);
   const hasAny = configuredIds.size > 0;
+  const canThink = supportsThinkingLevel(m.provider);
+  const thinkingLevels = getThinkingLevels(m.provider);
+  const currentThinking =
+    thinkingLevels.find((l) => l.value === defaultThinkingLevel) ?? thinkingLevels[0];
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          disabled={!hasAny}
-          className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
+    <div className="flex flex-1 items-center gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            disabled={!hasAny}
+            className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
+          >
+            <span className="flex items-center gap-2 truncate">
+              <ProviderIcon provider={m.provider} size={13} />
+              <span className="truncate">{m.label}</span>
+              <span className="text-muted-foreground">· {m.hint}</span>
+            </span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={11}
+              strokeWidth={2}
+              className="opacity-70"
+            />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          side="bottom"
+          sideOffset={6}
+          collisionPadding={12}
+          className="min-w-70 p-1"
         >
-          <span className="flex items-center gap-2 truncate">
-            <ProviderIcon provider={m.provider} size={13} />
-            <span className="truncate">{m.label}</span>
-            <span className="text-muted-foreground">· {m.hint}</span>
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="opacity-70"
-          />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        side="bottom"
-        sideOffset={6}
-        collisionPadding={12}
-        className="min-w-70 p-1"
-      >
-        <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
-          {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
-            const models = MODELS.filter((x) => x.provider === p.id);
-            if (models.length === 0) return null;
-            return (
-              <div key={p.id} className="px-1 pt-1.5 first:pt-1">
-                <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  <ProviderIcon provider={p.id} size={11} />
-                  <span>{p.label}</span>
-                </div>
-                {models.map((mod) => (
-                  <DropdownMenuItem
-                    key={mod.id}
-                    onSelect={() => void setDefaultModel(mod.id as ModelId)}
-                    className={cn(
-                      "flex items-start gap-2 text-[12px]",
-                      mod.id === defaultModel && "bg-accent/50",
-                    )}
-                  >
-                    <span className="flex flex-1 flex-col">
-                      <span>{mod.label}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {mod.description}
+          <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
+            {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
+              const models = MODELS.filter((x) => x.provider === p.id);
+              if (models.length === 0) return null;
+              return (
+                <div key={p.id} className="px-1 pt-1.5 first:pt-1">
+                  <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                    <ProviderIcon provider={p.id} size={11} />
+                    <span>{p.label}</span>
+                  </div>
+                  {models.map((mod) => (
+                    <DropdownMenuItem
+                      key={mod.id}
+                      onSelect={() => void setDefaultModel(mod.id as ModelId)}
+                      className={cn(
+                        "flex items-start gap-2 text-[12px]",
+                        mod.id === defaultModel && "bg-accent/50",
+                      )}
+                    >
+                      <span className="flex flex-1 flex-col">
+                        <span>{mod.label}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {mod.description}
+                        </span>
                       </span>
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {canThink ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              className="h-8 w-auto shrink-0 gap-1.5 px-2 text-[11.5px]"
+            >
+              <HugeiconsIcon
+                icon={BrainIcon}
+                size={12}
+                strokeWidth={1.5}
+                className="shrink-0 text-muted-foreground/70"
+              />
+              <span>{currentThinking.label}</span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={11}
+                strokeWidth={2}
+                className="opacity-70"
+              />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            collisionPadding={12}
+            className="min-w-40"
+          >
+            {thinkingLevels.map((l) => (
+              <DropdownMenuItem
+                key={l.value}
+                onSelect={() =>
+                  void setDefaultThinkingLevel(l.value as ThinkingLevel)
+                }
+                className={cn(
+                  "text-[11.5px]",
+                  l.value === defaultThinkingLevel && "bg-accent/50",
+                )}
+              >
+                <span>{l.label}</span>
+                {l.value === defaultThinkingLevel ? (
+                  <HugeiconsIcon
+                    icon={Tick01Icon}
+                    size={13}
+                    strokeWidth={2}
+                    className="ml-auto"
+                  />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
   );
 }
 
@@ -609,6 +682,7 @@ function AutocompleteRow({
   const enabled = usePreferencesStore((s) => s.autocompleteEnabled);
   const provider = usePreferencesStore((s) => s.autocompleteProvider);
   const modelId = usePreferencesStore((s) => s.autocompleteModelId);
+  const thinkingLevel = usePreferencesStore((s) => s.autocompleteThinkingLevel);
 
   const items = useMemo(() => {
     return MODELS.filter((m) => configuredIds.has(m.provider));
@@ -642,6 +716,10 @@ function AutocompleteRow({
   }, [items]);
 
   const hasKey = providerNeedsKey(provider) ? !!keys[provider] : true;
+  const canThink = supportsThinkingLevel(provider);
+  const thinkingLevels = getThinkingLevels(provider);
+  const currentThinking =
+    thinkingLevels.find((l) => l.value === thinkingLevel) ?? thinkingLevels[0];
 
   return (
     <>
@@ -716,6 +794,58 @@ function AutocompleteRow({
               })}
             </DropdownMenuContent>
           </DropdownMenu>
+          {enabled && canThink ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-8 w-auto shrink-0 gap-1.5 px-2 text-[11.5px]"
+                >
+                  <HugeiconsIcon
+                    icon={BrainIcon}
+                    size={12}
+                    strokeWidth={1.5}
+                    className="shrink-0 text-muted-foreground/70"
+                  />
+                  <span>{currentThinking.label}</span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={11}
+                    strokeWidth={2}
+                    className="opacity-70"
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                collisionPadding={12}
+                className="min-w-40"
+              >
+                {thinkingLevels.map((l) => (
+                  <DropdownMenuItem
+                    key={l.value}
+                    onSelect={() =>
+                      void setAutocompleteThinkingLevel(l.value as ThinkingLevel)
+                    }
+                    className={cn(
+                      "text-[11.5px]",
+                      l.value === thinkingLevel && "bg-accent/50",
+                    )}
+                  >
+                    <span>{l.label}</span>
+                    {l.value === thinkingLevel ? (
+                      <HugeiconsIcon
+                        icon={Tick01Icon}
+                        size={13}
+                        strokeWidth={2}
+                        className="ml-auto"
+                      />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </FieldRow>
       {enabled && !hasKey ? (

@@ -9,6 +9,7 @@ import {
   type ModelId,
   type ProviderId,
 } from "../config";
+import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from "../lib/thinking";
 import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
@@ -110,6 +111,9 @@ type StoreState = {
 
   selectedModelId: string;
   setSelectedModelId: (id: string) => void;
+
+  thinkingLevel: ThinkingLevel;
+  setThinkingLevel: (level: ThinkingLevel) => void;
 
   rightPanelOpen: boolean;
   openRightPanel: () => void;
@@ -227,6 +231,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set({ selectedModelId: id });
     void pushRecentModel(id);
   },
+
+  thinkingLevel: DEFAULT_THINKING_LEVEL,
+  setThinkingLevel: (level) => set({ thinkingLevel: level }),
 
   rightPanelOpen: false,
   openRightPanel: () => set({ rightPanelOpen: true }),
