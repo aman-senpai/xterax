@@ -46,7 +46,7 @@ export function ThinkingModeDropdown() {
           size="sm"
           disabled={!canThink}
           className={cn(
-            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground",
+            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground min-w-0 overflow-hidden",
             canThink
               ? level === "off"
                 ? "text-muted-foreground/50"
@@ -65,12 +65,12 @@ export function ThinkingModeDropdown() {
             strokeWidth={1.5}
             className="shrink-0 text-muted-foreground/70"
           />
-          <span>{current.label}</span>
+          <span className="min-w-0 truncate">{current.label}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={11}
             strokeWidth={2}
-            className="opacity-70"
+            className="shrink-0 opacity-70"
           />
         </Button>
       </DropdownMenuTrigger>

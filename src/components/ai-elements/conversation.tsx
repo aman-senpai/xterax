@@ -31,7 +31,7 @@ export const ConversationContent = ({
 }: ConversationContentProps) => (
   <StickToBottom.Content
     scrollClassName="scrollbar-visible"
-    className={cn("flex flex-col gap-5 p-4", className)}
+    className={cn("flex flex-col gap-5 p-4 min-w-0", className)}
     {...props}
   />
 );

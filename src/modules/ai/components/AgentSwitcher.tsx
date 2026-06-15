@@ -54,13 +54,13 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
           variant="outline"
           className={cn(
             !isMiniWindow
-              ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+              ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground min-w-0 overflow-hidden"
               : "text-xs mr-1",
           )}
           title={`Agent: ${active.name}`}
         >
           <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
-          <span className="max-w-[7rem] truncate">{active.name}</span>
+          <span className="min-w-0 truncate">{active.name}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={10}

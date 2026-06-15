@@ -165,8 +165,8 @@ function Body({ sessionId }: { sessionId: string }) {
           }}
         />
         <AiComposerInput />
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        <div className="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -174,14 +174,14 @@ function Body({ sessionId }: { sessionId: string }) {
               title="Attach file or image"
               onClick={() => fileInputRef.current?.click()}
               disabled={c.isBusy}
-              className="size-6 rounded-md text-muted-foreground hover:text-foreground"
+              className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
             >
               <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
             </Button>
             <ContextIndicator messages={helpers.messages} />
             <AgentSwitcher />
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1 ml-auto">
             <ThinkingModeDropdown />
             <ModelDropdown />
           </div>
