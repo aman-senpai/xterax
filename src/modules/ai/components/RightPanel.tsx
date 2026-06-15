@@ -14,8 +14,11 @@ import {
   Add01Icon,
   AlertCircleIcon,
   ArrowDown01Icon,
+  CheckListIcon,
   Delete02Icon,
   FilterIcon,
+  FlashIcon,
+  ShieldUserIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -244,6 +247,8 @@ function Header({
 }) {
   const historyOpen = useChatStore((s) => s.historyOpen);
   const toggleHistory = useChatStore((s) => s.toggleHistory);
+  const permissionMode = useChatStore((s) => s.permissionMode);
+  const setPermissionMode = useChatStore((s) => s.setPermissionMode);
 
   return (
     <div className="relative flex h-8 shrink-0 items-center gap-2 border-b border-border/60 px-2">
@@ -261,6 +266,49 @@ function Header({
       </span>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5">
+        <button
+          type="button"
+          onClick={() => setPermissionMode("read-only")}
+          className={cn(
+            "flex shrink-0 items-center justify-center size-6 rounded-md",
+            "transition-colors",
+            permissionMode === "read-only"
+              ? "bg-accent/60 text-foreground"
+              : "text-muted-foreground/50 hover:text-foreground",
+          )}
+          title="Read-only — deny all tool approvals automatically"
+        >
+          <HugeiconsIcon icon={ShieldUserIcon} size={12} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setPermissionMode("default")}
+          className={cn(
+            "flex shrink-0 items-center justify-center size-6 rounded-md",
+            "transition-colors",
+            permissionMode === "default"
+              ? "bg-accent/60 text-foreground"
+              : "text-muted-foreground/50 hover:text-foreground",
+          )}
+          title="Default — ask for approval on each tool"
+        >
+          <HugeiconsIcon icon={CheckListIcon} size={12} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setPermissionMode("auto-approve")}
+          className={cn(
+            "flex shrink-0 items-center justify-center size-6 rounded-md",
+            "transition-colors",
+            permissionMode === "auto-approve"
+              ? "bg-accent/60 text-foreground"
+              : "text-muted-foreground/50 hover:text-foreground",
+          )}
+          title="Auto-approve — approve all tool approvals automatically"
+        >
+          <HugeiconsIcon icon={FlashIcon} size={12} strokeWidth={2} />
+        </button>
+        <span className="mx-0.5 h-4 w-px bg-border/50" />
         <button
           type="button"
           onClick={toggleHistory}

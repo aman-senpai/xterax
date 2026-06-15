@@ -21,6 +21,8 @@ export function editorToText(root: HTMLElement): string {
       parts.push(`[#${child.dataset.name ?? "snippet"}]`);
     } else if (child instanceof HTMLElement && child.dataset.chip === "command") {
       parts.push(`[/${child.dataset.name ?? "cmd"}]`);
+    } else if (child instanceof HTMLElement && child.dataset.ghost !== undefined) {
+      // Ghost text — skip entirely (not real content).
     } else if (child instanceof HTMLElement) {
       // Unknown element — fall back to text
       parts.push(child.textContent ?? "");
@@ -205,6 +207,10 @@ export function insertTextAtCaret(_root: HTMLElement, text: string) {
 function nodeTextLen(node: Node): number {
   if (node.nodeType === Node.TEXT_NODE) {
     return node.textContent?.length ?? 0;
+  }
+  if (node instanceof HTMLElement && node.dataset.ghost !== undefined) {
+    // Ghost text — skip entirely (not real content).
+    return 0;
   }
   if (node instanceof HTMLElement && node.dataset.chip === "file") {
     return `[@${node.dataset.name ?? "file"}]`.length;

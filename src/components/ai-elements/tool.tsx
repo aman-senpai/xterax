@@ -5,9 +5,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Spinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   ArrowRight01Icon,
+  Cancel01Icon,
   CheckListIcon,
   Edit02Icon,
   EyeIcon,
@@ -21,13 +24,20 @@ import {
   RobotIcon,
   SparklesIcon,
   TerminalIcon,
+  Tick02Icon,
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
+import {
+  getSubagentState,
+  getCurrentBatch,
+  subscribeSubagentProgress,
+  resolveApproval,
+} from "@/modules/ai/agents/subagentProgress";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, memo, useState } from "react";
+import { isValidElement, memo, useEffect, useState } from "react";
 
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -48,7 +58,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   glob: { label: "Glob", icon: Folder01Icon },
   suggest_command: { label: "Suggest", icon: SparklesIcon },
   open_preview: { label: "Preview", icon: EyeIcon },
-  run_subagent: { label: "Subagent", icon: RobotIcon },
+  run_subagent: { label: "Subagents", icon: RobotIcon },
   todo_write: { label: "Todos", icon: CheckListIcon },
 };
 
@@ -71,6 +81,10 @@ const STATUS_LABEL: Record<ToolPart["state"], string> = {
   "output-denied": "denied",
   "output-error": "error",
 };
+
+function subagentLabel(desc?: string): string {
+  return desc ?? "Working";
+}
 
 function deriveSummary(toolName: string, input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
@@ -100,8 +114,11 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("intent") ?? str("description");
     case "open_preview":
       return str("path") ?? str("url");
-    case "run_subagent":
-      return str("agent") ?? str("task");
+    case "run_subagent": {
+      const tasks = Array.isArray(i.tasks) ? i.tasks : [];
+      if (tasks.length === 0) return "no tasks";
+      return `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
+    }
     case "todo_write": {
       const items = Array.isArray(i.todos) ? i.todos : null;
       return items
@@ -130,7 +147,6 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "edit",
   "multi_edit",
-  "run_subagent",
   "todo_write",
 ]);
 
@@ -157,6 +173,11 @@ const ToolImpl = ({
   const showOutputBody = !isHeavy && output !== undefined;
   const hasDetails =
     showInputBody || showOutputBody || Boolean(errorText);
+
+  // Subagents render as standalone task cards — no collapsible wrapper.
+  if (toolName === "run_subagent") {
+    return <SubagentCards input={input} output={output} state={state} />;
+  }
 
   return (
     <Collapsible
@@ -223,6 +244,314 @@ const ToolImpl = ({
 // For heavy tools, the only thing that should trigger a re-render is a
 // state transition or the path summary changing — NOT every input-content
 // token. We compare the cheap derived summary instead of the input ref.
+function SubagentCard({
+  description,
+  status,
+  text,
+  reasoning,
+  steps,
+  durationMs,
+  error,
+  jobId,
+  prompt,
+}: {
+  description: string;
+  status: string;
+  text?: string;
+  reasoning?: string;
+  steps?: Array<{
+    toolName: string;
+    input: unknown;
+    output?: unknown;
+    state: string;
+    errorText?: string;
+  }>;
+  pendingApprovals?: Array<{
+    stepIndex: number;
+    toolName: string;
+    input: unknown;
+  }>;
+  durationMs?: number;
+  error?: string;
+  jobId?: string;
+  prompt?: string;
+}) {
+  const isRunning = status === "running";
+  const isDone = status === "done";
+  const hasActivity = (reasoning && reasoning.length > 0) || (steps && steps.length > 0) || (text && text.length > 0);
+  const [open, setOpen] = useState(hasActivity || isRunning);
+
+  useEffect(() => {
+    if (hasActivity || isRunning) setOpen(true);
+  }, [hasActivity, isRunning]);
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-card shadow-sm">
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-2.5 py-2 text-left hover:bg-muted/30 transition-colors"
+      >
+        {isRunning ? (
+          <Spinner className="size-3 shrink-0" />
+        ) : (
+          <span className={cn("size-1.5 shrink-0 rounded-full", isDone ? "bg-emerald-500" : "bg-destructive")} />
+        )}
+        <HugeiconsIcon icon={RobotIcon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+        <span className="text-[12px] font-medium text-foreground truncate flex-1">{description}</span>
+        {isDone && durationMs != null ? (
+          <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+            {(durationMs / 1000).toFixed(1)}s
+          </span>
+        ) : null}
+        <HugeiconsIcon icon={ArrowRight01Icon} size={11} strokeWidth={2} className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+      </button>
+
+      {/* Expanded content */}
+      {open ? (
+        <div className="border-t border-border/40">
+          {/* Error */}
+          {error ? (
+            <div className="mx-2.5 mt-1.5 flex items-center gap-1.5 rounded-md bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
+              <span className="size-1 shrink-0 rounded-full bg-destructive" />
+              {error}
+            </div>
+          ) : null}
+
+          <div className="px-2.5 py-2 space-y-2">
+            {/* Prompt/input shown as a user message */}
+            {prompt ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Task</div>
+                <div className="rounded-2xl rounded-br-sm bg-muted/70 px-3 py-2 text-[12px] text-foreground leading-relaxed whitespace-pre-wrap">
+                  {prompt.length > 300 ? prompt.slice(0, 300) + "…" : prompt}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Reasoning — matches main chat's Reasoning border-left style */}
+            {reasoning ? (
+              <div className="border-l border-border/50 pl-3">
+                <div className="text-[10.5px] italic text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-8">
+                  {reasoning}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Tool calls — matching main tool card style */}
+            {steps?.map((s, si) => (
+              <div key={si} className={cn(
+                "rounded-md border px-2 py-1.5",
+                s.state === "done" ? "border-border/50 bg-muted/20" :
+                s.state === "error" || s.state === "denied" ? "border-destructive/30 bg-destructive/5" :
+                s.state === "awaiting-approval" ? "border-amber-500/30 bg-amber-500/5" :
+                "border-border/50 bg-muted/20",
+              )}>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn("size-1 shrink-0 rounded-full",
+                    s.state === "done" ? "bg-emerald-500" :
+                    s.state === "error" || s.state === "denied" ? "bg-destructive" :
+                    s.state === "awaiting-approval" ? "bg-amber-500" : "bg-amber-500 animate-pulse",
+                  )} />
+                  <span className="font-mono text-[11px] text-foreground/80 font-medium">{toolDisplayName(s.toolName)}</span>
+                  {s.input && typeof s.input === "object" ? (
+                    <span className="font-mono text-[10px] text-muted-foreground truncate flex-1">{toolInputSummary(s.toolName, s.input)}</span>
+                  ) : null}
+                  {s.state === "denied" ? <span className="shrink-0 text-[10px] font-medium text-destructive">Denied</span> : null}
+                  {s.state === "error" && s.errorText ? <span className="shrink-0 text-[10px] text-destructive truncate max-w-32">{s.errorText}</span> : null}
+                </div>
+                {/* Approve/Deny — matching AiToolApproval buttons */}
+                {s.state === "awaiting-approval" && jobId ? (
+                  <div className="mt-1.5 flex items-center gap-1.5 border-t border-amber-500/20 pt-1.5">
+                    <Button size="sm" variant="ghost" onClick={() => resolveApproval(jobId, si, false)} className="h-6 gap-1 text-[11px]">
+                      <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} /> Deny
+                    </Button>
+                    <Button size="sm" variant="default" onClick={() => resolveApproval(jobId, si, true)} className="h-6 gap-1 text-[11px]">
+                      <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} /> Approve
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+
+            {/* Text output */}
+            {text ? (
+              <div className="text-[12px] text-foreground/85 leading-relaxed whitespace-pre-wrap">{text}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Human-readable label for tool names. */
+function toolDisplayName(name: string): string {
+  const labels: Record<string, string> = {
+    read_file: "Read", list_directory: "List", write_file: "Write",
+    create_directory: "Create dir", edit: "Edit", multi_edit: "Edit batch",
+    grep: "Search", glob: "Glob", bash_run: "Run", bash_background: "Spawn",
+    bash_logs: "Logs", bash_list: "Jobs", bash_kill: "Kill",
+    suggest_command: "Suggest", open_preview: "Preview",
+  };
+  return labels[name] ?? name;
+}
+
+/** Compact input summary for tool call display. */
+function toolInputSummary(
+  toolName: string,
+  input: unknown,
+): string {
+  if (!input || typeof input !== "object") return "";
+  const i = input as Record<string, unknown>;
+  const s = (k: string) => (typeof i[k] === "string" ? i[k] as string : "");
+  switch (toolName) {
+    case "write_file":
+    case "read_file":
+    case "edit":
+    case "multi_edit":
+    case "create_directory":
+    case "list_directory":
+      return s("path");
+    case "bash_run":
+    case "bash_background":
+      return s("command");
+    case "grep":
+      return s("pattern") ?? s("query");
+    case "glob":
+      return s("pattern");
+    default:
+      return "";
+  }
+}
+
+function SubagentCards({
+  input,
+  output,
+  state,
+}: {
+  input: unknown;
+  output: unknown;
+  state: ToolPart["state"];
+}) {
+  const [, setTick] = useState(0);
+
+  // Subscribe to streaming progress updates.
+  useEffect(() => {
+    return subscribeSubagentProgress(() => setTick((n) => n + 1));
+  }, []);
+
+  const tasks = (
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>).tasks
+      : null
+  ) as Array<{ description?: string; prompt?: string }> | null;
+
+  const results = (
+    output && typeof output === "object"
+      ? (output as Record<string, unknown>).results
+      : null
+  ) as Array<{
+    description?: string;
+    status?: string;
+    summary?: string;
+    stepCount?: number;
+    durationMs?: number;
+    error?: string;
+  }> | null;
+
+  const isRunning =
+    state === "input-streaming" ||
+    state === "input-available" ||
+    (results == null && state !== "output-error");
+
+  // During execution, try to get live streaming progress for each task.
+  if (isRunning && tasks && tasks.length > 0) {
+    const batch = getCurrentBatch();
+
+    // Count completed subagents by checking progress store statuses.
+    const { done, total } = batch.reduce(
+      (acc, job) => {
+        const s = job ? getSubagentState(job.jobId) : null;
+        acc.total++;
+        if (s?.status === "done" || s?.status === "error") acc.done++;
+        return acc;
+      },
+      { done: 0, total: 0 },
+    );
+
+    const progressWidth = total > 0 ? (done / total) * 100 : 0;
+
+    return (
+      <div className="space-y-1.5">
+        {/* Progress bar */}
+        {total > 0 ? (
+          <div className="flex items-center gap-2 px-0.5">
+            <div className="flex-1 h-1 rounded-full bg-muted/60 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-emerald-500/60 transition-all duration-300"
+                style={{ width: `${progressWidth}%` }}
+              />
+            </div>
+            <span className="shrink-0 text-[10px] font-mono text-muted-foreground tabular-nums">
+              {done}/{total}
+            </span>
+          </div>
+        ) : null}
+        {tasks.map((t, i) => {
+          const job = batch[i];
+          const prog = job ? getSubagentState(job.jobId) : null;
+
+          return (
+            <SubagentCard
+              key={i}
+              description={t.description || `Task ${i + 1}`}
+              status={prog?.status ?? "running"}
+              text={prog?.text}
+              reasoning={prog?.reasoning}
+              steps={prog?.steps}
+              error={prog?.error}
+              jobId={job?.jobId}
+              prompt={t.prompt}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Error state.
+  if (state === "output-error" && !results) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+        <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
+        <span className="text-[11px] text-destructive">Subagent error</span>
+      </div>
+    );
+  }
+
+  // Results.
+  if (results && results.length > 0) {
+    return (
+      <div className="space-y-1.5">
+        {results.map((r, i) => (
+          <SubagentCard
+            key={i}
+            description={r.description || `Task ${i + 1}`}
+            status={r.status ?? "done"}
+            text={r.summary}
+            durationMs={r.durationMs}
+            error={r.error}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export const Tool = memo(ToolImpl, (a, b) => {
   if (a.toolName !== b.toolName || a.state !== b.state) return false;
   if (a.errorText !== b.errorText) return false;
@@ -299,6 +628,28 @@ function renderInputPreview(
       <div className="font-mono text-[11px] text-muted-foreground">{path}</div>
     );
   }
+  if (toolName === "run_subagent") {
+    const tasks = Array.isArray(i.tasks) ? i.tasks : [];
+    if (tasks.length === 0) return null;
+    return (
+      <div className="space-y-1.5">
+        {tasks.map((t: { description?: string; prompt?: string }, idx: number) => (
+          <div key={idx} className="flex items-center gap-2 rounded-md bg-muted/30 px-2 py-1.5">
+            <Spinner className="size-3 shrink-0" />
+            <HugeiconsIcon
+              icon={RobotIcon}
+              size={11}
+              strokeWidth={1.75}
+              className="shrink-0 text-muted-foreground"
+            />
+            <span className="text-[11px] text-foreground/80 truncate">
+              {t.description || `Task ${idx + 1}`}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
   if (toolName === "grep") {
     const pat = str("pattern") ?? str("query");
     const path = str("path") ?? str("root");
@@ -361,6 +712,90 @@ function ToolOutput({
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
+
+  if (toolName === "run_subagent") {
+    const results = Array.isArray(o.results) ? o.results : [];
+    if (results.length === 0) return null;
+
+    return (
+      <div className="space-y-1.5">
+        {results.map(
+          (
+            r: {
+              description?: string;
+              status?: string;
+              summary?: string;
+              stepCount?: number;
+              durationMs?: number;
+              error?: string;
+            },
+            i: number,
+          ) => (
+            <div
+              key={i}
+              className="rounded-md border border-border/50 bg-card/50 px-2.5 py-1.5"
+            >
+              <div className="flex items-center gap-2 mb-0.5">
+                <span
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    r.status === "done"
+                      ? "bg-emerald-500"
+                      : "bg-destructive",
+                  )}
+                />
+                <HugeiconsIcon
+                  icon={RobotIcon}
+                  size={11}
+                  strokeWidth={1.75}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="text-[11px] font-medium text-foreground truncate">
+                  {subagentLabel(r.description)}
+                </span>
+                {r.status === "done" && r.durationMs != null ? (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    · {(r.durationMs / 1000).toFixed(1)}s · {r.stepCount ?? 0}{" "}
+                    steps
+                  </span>
+                ) : null}
+              </div>
+              {r.error ? (
+                <div className="mt-1 text-[10.5px] text-destructive whitespace-pre-wrap">
+                  {r.error}
+                </div>
+              ) : null}
+              {r.status === "done" && r.summary ? (
+                <div className="mt-1 text-[11px] text-foreground/90 whitespace-pre-wrap line-clamp-6 leading-relaxed">
+                  {r.summary}
+                </div>
+              ) : null}
+            </div>
+          ),
+        )}
+      </div>
+    );
+  }
+
+  if (toolName === "read_subagent_results") {
+    // Legacy — this tool is no longer used (run_subagent blocks internally).
+    // Keep the handler for historical tool calls that may still be in messages.
+    const results = Array.isArray(o.results) ? o.results : [];
+    if (results.length === 0) return null;
+    return (
+      <div className="space-y-1.5">
+        {results.map((r: { description?: string; status?: string; summary?: string; error?: string }, i: number) => (
+          <div key={i} className="rounded-md border border-border/50 bg-card/50 px-2.5 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className={cn("size-1.5 shrink-0 rounded-full", r.status === "done" ? "bg-emerald-500" : "bg-destructive")} />
+              <span className="text-[11px] font-medium truncate">{r.description ?? "Subagent"}</span>
+            </div>
+            {r.summary ? <div className="mt-1 text-[11px] whitespace-pre-wrap line-clamp-4">{r.summary}</div> : null}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (toolName === "read_file") {
     const path = typeof o.path === "string" ? o.path : "";

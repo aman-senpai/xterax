@@ -55,7 +55,12 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
       `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
-    run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
+    run_subagent: (i) => {
+      const tasks = Array.isArray(i.tasks) ? i.tasks : [];
+      return tasks.length > 0
+        ? `Spawning ${tasks.length} subagent${tasks.length === 1 ? "" : "s"}`
+        : "Spawning subagents";
+    },
   };
 
 function shortPath(p: unknown): string {

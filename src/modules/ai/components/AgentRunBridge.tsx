@@ -67,6 +67,7 @@ function Bridge({
   const openRightPanel = useChatStore((s) => s.openRightPanel);
   const persistMessages = useChatStore((s) => s.persistMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
+  const permissionMode = useChatStore((s) => s.permissionMode);
 
   // Expose the approval responder so the diff tab can resolve approvals.
   // We keep it in a ref-stable closure so identity is stable per render.
@@ -103,9 +104,27 @@ function Bridge({
     return n;
   }, [messages]);
 
+  // Detect if the agent is blocked on a run_subagent tool call (subagent
+  // cards show their own progress — no need for duplicate "thinking" UI).
+  const pendingSubagent = useMemo(() => {
+    for (const m of messages) {
+      if (m.role !== "assistant") continue;
+      for (const p of m.parts) {
+        const type = (p as { type?: string }).type ?? "";
+        const state = (p as { state?: string }).state ?? "";
+        const toolName = type.startsWith("tool-") ? type.slice(5) : null;
+        if (toolName === "run_subagent" && state !== "output-available" && state !== "output-error") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [messages]);
+
   useEffect(() => {
     let runStatus: AgentRunStatus;
     if (approvalsPending > 0) runStatus = "awaiting-approval";
+    else if (pendingSubagent) runStatus = "idle";
     else if (status === "submitted") runStatus = "thinking";
     else if (status === "streaming") runStatus = "streaming";
     else if (status === "error") runStatus = "error";
@@ -121,8 +140,8 @@ function Bridge({
   }, [status, approvalsPending, patch]);
 
   useEffect(() => {
-    if (approvalsPending > 0) openRightPanel();
-  }, [approvalsPending, openRightPanel]);
+    if (approvalsPending > 0 && permissionMode === "default") openRightPanel();
+  }, [approvalsPending, openRightPanel, permissionMode]);
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't

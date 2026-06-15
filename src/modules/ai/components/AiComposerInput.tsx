@@ -2,9 +2,10 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { usePresence } from "@/lib/usePresence";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
+import { useChatAutocomplete } from "../lib/chatAutocomplete/useChatAutocomplete";
 import {
   editorToText,
   getCaretOffset,
@@ -306,6 +307,22 @@ export function AiComposerInput() {
   const lastVoiceLabel = useRef("");
   if (voiceLabel) lastVoiceLabel.current = voiceLabel;
 
+  const handleAutocompleteAccept = useCallback(
+    (newValue: string) => {
+      syncing.current = true;
+      c.setValue(newValue);
+    },
+    [c],
+  );
+
+  const {
+    ghostText,
+    ghostPos,
+    handleKeyDown: handleAutocompleteKey,
+    trigger: triggerAutocomplete,
+    cancelPending: cancelAutocomplete,
+  } = useChatAutocomplete(editorRef, pickerOpen, handleAutocompleteAccept);
+
   return (
     <>
       <ChipsRow
@@ -377,12 +394,16 @@ export function AiComposerInput() {
                 const el = editorRef.current;
                 if (!el) return;
                 syncing.current = true;
-                c.setValue(editorToText(el));
+                const text = editorToText(el);
+                c.setValue(text);
+                triggerAutocomplete(text);
                 updateTrigger();
               }}
               onClick={updateTrigger}
               onKeyUp={updateTrigger}
               onKeyDown={(e) => {
+                // Autocomplete ghost text takes priority (Tab accept, Esc dismiss).
+                if (handleAutocompleteKey(e)) return;
                 if (pickerOpen) {
                   const items = fileTrigger ? filteredFiles : filteredItems;
                   if (e.key === "ArrowDown") {
@@ -437,6 +458,7 @@ export function AiComposerInput() {
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
+                  cancelAutocomplete();
                   c.submit();
                 }
               }}
@@ -452,6 +474,17 @@ export function AiComposerInput() {
                 aria-hidden
               >
                 Ask Terax anything{"  "}—{"  "}# for snippets and commands, @ for files
+              </span>
+            )}
+
+            {/* Ghost text autocomplete overlay */}
+            {ghostText && ghostPos && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute text-[13px] leading-relaxed italic text-muted-foreground/45 select-none whitespace-pre-wrap break-words"
+                style={{ left: ghostPos.x, top: ghostPos.y }}
+              >
+                {ghostText}
               </span>
             )}
 

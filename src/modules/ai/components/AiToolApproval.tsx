@@ -12,12 +12,15 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
   toolName: string;
   onRespond: (approved: boolean) => void;
+  pendingCount?: number;
+  onApproveAll?: () => void;
+  onDenyAll?: () => void;
 };
 
 const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
@@ -30,14 +33,67 @@ const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
     bash_background: { label: "Spawn background process", icon: TerminalIcon },
   };
 
-function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
+function AiToolApprovalImpl({
+  part,
+  toolName,
+  onRespond,
+  pendingCount,
+  onApproveAll,
+  onDenyAll,
+}: Props) {
   const meta = TOOL_META[toolName];
   const label = meta?.label ?? toolName;
   const Icon = meta?.icon ?? ToolsIcon;
   const input = part.input as Record<string, unknown>;
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    cardRef.current?.focus();
+  }, []);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const isMeta = e.metaKey || e.ctrlKey;
+    if (e.key === "Enter" || (isMeta && e.key.toLowerCase() === "y")) {
+      e.preventDefault();
+      onRespond(true);
+    } else if (
+      e.key === "Escape" ||
+      (isMeta && e.key.toLowerCase() === "n")
+    ) {
+      e.preventDefault();
+      onRespond(false);
+    }
+  };
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-sm">
+    <div
+      ref={cardRef}
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      className={cn(
+        "rounded-lg border border-border bg-card shadow-sm",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+      )}
+    >
+      {pendingCount != null && pendingCount > 1 && onApproveAll && onDenyAll ? (
+        <div className="flex items-center justify-end gap-2.5 border-b border-border/40 px-3 py-1">
+          <button
+            type="button"
+            onClick={onDenyAll}
+            className="text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Deny All ({pendingCount})
+          </button>
+          <button
+            type="button"
+            onClick={onApproveAll}
+            className="text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Approve All ({pendingCount})
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <span className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
         <HugeiconsIcon
@@ -89,7 +145,10 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   return (
     a.toolName === b.toolName &&
     a.part.approval.id === b.part.approval.id &&
-    a.onRespond === b.onRespond
+    a.onRespond === b.onRespond &&
+    a.pendingCount === b.pendingCount &&
+    a.onApproveAll === b.onApproveAll &&
+    a.onDenyAll === b.onDenyAll
   );
 });
 
@@ -119,54 +178,73 @@ function PreviewBlock({
       </div>
     );
   }
-  // For file mutations we deliberately do NOT preview content here —
-  // streamed write/edit content thrashes the UI and the AI diff tab is the
-  // authoritative place to review the change. Show just the path + a
-  // one-line size hint so the user knows what's being touched.
+
   if (toolName === "write_file") {
     const content = typeof input.content === "string" ? input.content : "";
     const lines = content ? content.split("\n").length : 0;
+    const previewLines = content ? content.split("\n").slice(0, 15) : [];
+    const remaining = lines - 15;
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
-        <div className="text-[10.5px] text-muted-foreground/80">
-          {lines} line{lines === 1 ? "" : "s"} · review in the diff tab
-        </div>
+        {content ? (
+          <>
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 text-[11px] leading-relaxed">
+              {previewLines.join("\n")}
+            </pre>
+            {remaining > 0 ? (
+              <div className="text-[10.5px] text-muted-foreground/80">
+                ... {remaining} more line{remaining === 1 ? "" : "s"}
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </div>
     );
   }
+
   if (toolName === "edit") {
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
-    const removed = oldStr ? oldStr.split("\n").length : 0;
-    const added = newStr ? newStr.split("\n").length : 0;
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1 font-mono text-[11px]">
         <div className="text-muted-foreground">
           {String(input.path ?? "")}
           {input.replace_all ? " · replace all" : ""}
         </div>
-        <div className="text-[10.5px] text-muted-foreground/80">
-          −{removed} / +{added} line{added === 1 && removed === 1 ? "" : "s"} ·
-          review in the diff tab
-        </div>
+        <DiffBlock oldStr={oldStr} newStr={newStr} />
       </div>
     );
   }
+
   if (toolName === "multi_edit") {
     const edits = Array.isArray(input.edits)
       ? (input.edits as Array<{ old_string?: string; new_string?: string }>)
       : [];
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
-        <div className="text-[10.5px] text-muted-foreground/80">
-          {edits.length} edit{edits.length === 1 ? "" : "s"} · review in the
-          diff tab
-        </div>
+        {edits.length > 0 ? (
+          <div className="max-h-[120px] space-y-0.5 overflow-auto rounded-md bg-muted/60 p-2">
+            {edits.map((edit, i) => (
+              <div key={i}>
+                {i > 0 ? (
+                  <div className="mb-0.5 border-t border-border/30" />
+                ) : null}
+                {edit.old_string != null || edit.new_string != null ? (
+                  <DiffBlock
+                    oldStr={edit.old_string ?? ""}
+                    newStr={edit.new_string ?? ""}
+                  />
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
+
   if (toolName === "create_directory") {
     return (
       <div className="font-mono text-[11px] text-muted-foreground">
@@ -174,6 +252,7 @@ function PreviewBlock({
       </div>
     );
   }
+
   return (
     <pre className="overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed">
       {JSON.stringify(input, null, 2)}
@@ -181,3 +260,43 @@ function PreviewBlock({
   );
 }
 
+function DiffBlock({
+  oldStr,
+  newStr,
+}: {
+  oldStr: string;
+  newStr: string;
+}) {
+  const oldLines = oldStr ? oldStr.split("\n") : [];
+  const newLines = newStr ? newStr.split("\n") : [];
+  const lines: Array<{ kind: "removed" | "added"; text: string }> = [];
+
+  for (const line of oldLines) {
+    lines.push({ kind: "removed", text: line });
+  }
+  for (const line of newLines) {
+    lines.push({ kind: "added", text: line });
+  }
+
+  if (lines.length === 0) return null;
+
+  return (
+    <div className="max-h-[120px] overflow-auto rounded-md bg-muted/60 p-2">
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className={cn(
+            "whitespace-pre text-[11px] leading-relaxed",
+            line.kind === "removed" &&
+              "bg-destructive/15 text-destructive",
+            line.kind === "added" &&
+              "bg-emerald-500/15 text-emerald-600",
+          )}
+        >
+          {line.kind === "removed" ? "- " : "+ "}
+          {line.text}
+        </div>
+      ))}
+    </div>
+  );
+}

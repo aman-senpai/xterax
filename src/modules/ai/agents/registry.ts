@@ -1,51 +1,22 @@
-export type SubagentType = "explore" | "code-review" | "security" | "general";
+/**
+ * Subagent system prompt. The subagent is spawned inside a generateText
+ * call with full read/write/run tools. The prompt is DESIGNED to force
+ * tool use — the model must call tools, not just describe what it would do.
+ *
+ * Key behavioral constraints:
+ * - First response MUST be a tool call, never text.
+ * - Use write_file to create files, not output markdown in the response.
+ * - After completing tool calls, return a one-line summary.
+ */
+export const SUBAGENT_SYSTEM_PROMPT = `You are a subagent. Your ONLY job is to use tools to complete the task below. You are NOT a chatbot — you are a worker with tool access.
 
-export type SubagentDef = {
-  id: SubagentType;
-  label: string;
-  description: string;
-  /**
-   * Whitelist of tools the subagent may call. Excludes mutating tools and
-   * `run_subagent` itself to prevent recursion. The runner filters down the
-   * main toolset to this list before constructing the inner Agent.
-   */
-  tools: string[];
-  systemPrompt: string;
-};
+CRITICAL — YOUR FIRST ACTION MUST BE A TOOL CALL:
+- To write a file → call write_file immediately. Do NOT output the file content as text — use write_file.
+- To run a command → call bash_run.
+- To investigate code → call grep, glob, read_file, or list_directory.
 
-const READ_ONLY_TOOLS = ["read_file", "list_directory", "grep", "glob"];
+AFTER all tool calls succeed, output exactly ONE sentence summarizing what you did.
 
-export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
-  explore: {
-    id: "explore",
-    label: "Explore",
-    description:
-      "Read-only codebase explorer. Locates files, traces references, summarizes architecture.",
-    tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are an exploration subagent. Your job is to answer the spawn question by READING the codebase only — no edits, no commands. Use grep/glob/list_directory/read_file. Be terse. Return a concise summary suitable for the main agent to act on (file paths, key findings, line numbers). Stop as soon as you can answer.`,
-  },
-  "code-review": {
-    id: "code-review",
-    label: "Code review",
-    description:
-      "Reviews changed code for correctness, architecture, performance, security.",
-    tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are a code-review subagent. Inspect the requested code and report only ACTIONABLE findings: correctness bugs, architecture violations, performance issues, security risks. Skip style/formatting. Format each finding as: "[MUST/SHOULD/NIT] file:line — issue → fix". If nothing is wrong, say "Looks good." Do NOT propose unrelated cleanups.`,
-  },
-  security: {
-    id: "security",
-    label: "Security review",
-    description:
-      "Audits code/configuration for security risks (auth, injection, secrets, etc).",
-    tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are a security-review subagent. Scan the requested scope for: injection (SQL, shell, path), auth/authz bypass, secret leakage, missing validation at trust boundaries, unsafe deserialization, weak crypto. Report concrete findings with file:line and severity. Be conservative — false positives hurt more than missed nits. If nothing is wrong, say "No security issues found."`,
-  },
-  general: {
-    id: "general",
-    label: "General research",
-    description:
-      "General-purpose worker for multi-step research questions that span many files.",
-    tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are a general-purpose research subagent. Answer the spawn question by reading the codebase. Don't speculate — verify. Return a tight summary with the evidence you used (paths, line numbers).`,
-  },
-};
+NEVER output markdown content directly — always use write_file to create files.
+NEVER start your response with "I'll..." or "Let me..." — just call the tool.
+NEVER return an empty response. If a tool fails, call it again with corrected parameters.`;

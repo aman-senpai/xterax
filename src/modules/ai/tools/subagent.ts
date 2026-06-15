@@ -1,55 +1,73 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runSubagent } from "../agents/runSubagent";
-import { SUBAGENTS, type SubagentType } from "../agents/registry";
+import { spawnSubagent, waitForSubagents } from "../agents/runSubagent";
+import { registerBatch } from "../agents/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
-
-const TYPE_KEYS = Object.keys(SUBAGENTS) as [SubagentType, ...SubagentType[]];
 
 export function buildSubagentTools(ctx: ToolContext) {
   return {
     run_subagent: tool({
-      description: `Spawn an isolated subagent with its own restricted toolset and a fresh message history. Use when you need to delegate a self-contained read-only investigation (large search, code review, security audit) without polluting your own context. The subagent returns a single text summary; pick a 'type' that matches its job.
+      description: `Spawn one or more background subagents that work in PARALLEL. Each subagent is a full agent with read/write/run access — they can read files, write code, run commands, everything.
 
-Types:
-${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
+Provide an array of tasks — each with a short 'description' label and a self-contained 'prompt' that includes WHAT to do and WHERE to do it. The tool blocks until ALL subagents complete, then returns all results at once. No polling, no follow-up calls.
 
-Auto-executes (no approval) — subagents are read-only by design.`,
+IMPORTANT: Spawn ALL subagents in ONE call so they run concurrently. Include full instructions in each prompt — subagents have no memory of your conversation.
+
+Auto-executes (no approval).`,
       inputSchema: z.object({
-        type: z.enum(TYPE_KEYS),
-        prompt: z
-          .string()
-          .describe(
-            "Self-contained instruction. The subagent has no memory of prior conversation — include all relevant context.",
-          ),
-        description: z
-          .string()
-          .optional()
-          .describe("Short label shown in the chat UI for the spawn card."),
+        tasks: z
+          .array(
+            z.object({
+              description: z
+                .string()
+                .describe("Short label shown while the subagent runs (e.g. 'Research auth patterns')"),
+              prompt: z
+                .string()
+                .describe("Self-contained instruction with all context. Include file paths, what to do, and where to put output."),
+            }),
+          )
+          .describe("One or more tasks to run in parallel."),
       }),
-      execute: async ({ type, prompt, description }) => {
-        const { apiKeys, selectedModelId, patchAgentMeta } =
+      execute: async ({ tasks }) => {
+        const { apiKeys, selectedModelId } =
           useChatStore.getState();
-        try {
-          const r = await runSubagent({
-            type,
-            prompt,
+
+        if (tasks.length === 0) {
+          return { results: [] };
+        }
+
+        // Spawn all subagents in parallel — each returns immediately with a jobId.
+        const spawned: Array<{ jobId: string; desc: string }> = [];
+        const jobIds = tasks.map((t) => {
+          const jobId = spawnSubagent({
+            prompt: t.prompt,
+            description: t.description,
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
-            onStep: (label) => patchAgentMeta({ step: label }),
           });
-          return {
-            type,
-            description,
+          spawned.push({ jobId, desc: t.description || `Task ${spawned.length + 1}` });
+          return jobId;
+        });
+
+        // Register batch so the UI can subscribe to per-task streaming progress.
+        registerBatch(spawned);
+
+        // Block until all complete, then return results.
+        const results = await waitForSubagents(jobIds);
+
+        return {
+          results: results.map((r) => ({
+            description: r.description,
+            status: r.status,
             summary: r.summary,
             stepCount: r.stepCount,
             durationMs: r.durationMs,
-          };
-        } catch (e) {
-          return { error: String(e), type };
-        }
+            error: r.error,
+          })),
+          allDone: true,
+        };
       },
     }),
   } as const;

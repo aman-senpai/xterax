@@ -40,7 +40,7 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { AiToolApproval } from "./AiToolApproval";
 
 function CommandSnippet({ name }: { name: string }) {
@@ -204,6 +204,49 @@ export function AiChatView({
     [addToolApprovalResponse],
   );
 
+  const pendingApprovals = useMemo(() => {
+    const ids: string[] = [];
+    for (const m of messages) {
+      for (const p of m.parts) {
+        const part = p as AnyToolPart;
+        if (part.state === "approval-requested" && part.approval?.id) {
+          ids.push(part.approval.id);
+        }
+      }
+    }
+    return ids;
+  }, [messages]);
+
+  const pendingCount = pendingApprovals.length;
+
+  const onApproveAll = useCallback(() => {
+    for (const id of pendingApprovals) {
+      addToolApprovalResponse({ id, approved: true });
+    }
+  }, [pendingApprovals, addToolApprovalResponse]);
+
+  const onDenyAll = useCallback(() => {
+    for (const id of pendingApprovals) {
+      addToolApprovalResponse({ id, approved: false });
+    }
+  }, [pendingApprovals, addToolApprovalResponse]);
+
+  useEffect(() => {
+    if (pendingCount === 0) return;
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        onApproveAll();
+      } else if (e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        onDenyAll();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pendingCount, onApproveAll, onDenyAll]);
+
   if (messages.length === 0) {
     return (
       <Conversation>
@@ -226,6 +269,9 @@ export function AiChatView({
             message={m}
             onApproval={onApproval}
             streaming={m.id === streamingMessageId}
+            pendingCount={pendingCount}
+            onApproveAll={onApproveAll}
+            onDenyAll={onDenyAll}
           />
         ))}
         {compactionNotice && (
@@ -321,10 +367,16 @@ const RenderedMessage = memo(function RenderedMessage({
   message,
   onApproval,
   streaming,
+  pendingCount,
+  onApproveAll,
+  onDenyAll,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  pendingCount: number;
+  onApproveAll: () => void;
+  onDenyAll: () => void;
 }) {
   // Index of the trailing text part — only that one is "live" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
@@ -396,6 +448,9 @@ const RenderedMessage = memo(function RenderedMessage({
                   part={g.part}
                   onApproval={onApproval}
                   streaming={streaming && g.idx === lastTextIdx}
+                  pendingCount={pendingCount}
+                  onApproveAll={onApproveAll}
+                  onDenyAll={onDenyAll}
                 />
               </PartAppear>
             );
@@ -590,10 +645,16 @@ const RenderedPart = memo(function RenderedPart({
   part,
   onApproval,
   streaming,
+  pendingCount,
+  onApproveAll,
+  onDenyAll,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  pendingCount: number;
+  onApproveAll: () => void;
+  onDenyAll: () => void;
 }) {
   if (part.type === "text") {
     return (
@@ -622,6 +683,9 @@ const RenderedPart = memo(function RenderedPart({
       <RenderedTool
         part={part as unknown as AnyToolPart}
         onApproval={onApproval}
+        pendingCount={pendingCount}
+        onApproveAll={onApproveAll}
+        onDenyAll={onDenyAll}
       />
     );
   }
@@ -632,21 +696,48 @@ const RenderedPart = memo(function RenderedPart({
 const RenderedTool = memo(function RenderedTool({
   part,
   onApproval,
+  pendingCount,
+  onApproveAll,
+  onDenyAll,
 }: {
   part: AnyToolPart;
   onApproval: (id: string, approved: boolean) => void;
+  pendingCount: number;
+  onApproveAll: () => void;
+  onDenyAll: () => void;
 }) {
+  const permissionMode = useChatStore((s) => s.permissionMode);
+  const respondedRef = useRef(false);
+  const onApprovalRef = useRef(onApproval);
+  onApprovalRef.current = onApproval;
+
   const toolName =
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
 
+  useEffect(() => {
+    if (part.state !== "approval-requested") return;
+    if (permissionMode === "default") return;
+    const approval = part.approval;
+    if (!approval) return;
+    if (respondedRef.current) return;
+    respondedRef.current = true;
+    onApprovalRef.current(approval.id, permissionMode === "auto-approve");
+  }, [permissionMode, part.approval?.id, part.state]);
+
   if (part.state === "approval-requested") {
+    if (permissionMode !== "default" && respondedRef.current) {
+      return <AutoApprovalBadge approved={permissionMode === "auto-approve"} />;
+    }
     return (
       <AiToolApproval
         part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
         toolName={toolName}
         onRespond={(approved) => onApproval(part.approval.id, approved)}
+        pendingCount={pendingCount}
+        onApproveAll={onApproveAll}
+        onDenyAll={onDenyAll}
       />
     );
   }
@@ -662,3 +753,24 @@ const RenderedTool = memo(function RenderedTool({
     />
   );
 });
+
+function AutoApprovalBadge({ approved }: { approved: boolean }) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-md border border-border/50 bg-card/50 px-2.5 py-1.5 text-[11px]">
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          approved ? "bg-emerald-500" : "bg-destructive",
+        )}
+      />
+      <span
+        className={cn(
+          "font-medium",
+          approved ? "text-emerald-500" : "text-destructive",
+        )}
+      >
+        {approved ? "Auto-approved" : "Auto-denied"}
+      </span>
+    </div>
+  );
+}

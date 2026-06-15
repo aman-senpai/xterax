@@ -26,6 +26,8 @@ import {
 } from "../lib/sessions";
 import { pushRecentModel } from "../lib/modelPrefs";
 
+export type PermissionMode = "default" | "auto-approve" | "read-only";
+
 export type Live = {
   getCwd: () => string | null;
   getTerminalContext: () => string | null;
@@ -114,6 +116,9 @@ type StoreState = {
 
   thinkingLevel: ThinkingLevel;
   setThinkingLevel: (level: ThinkingLevel) => void;
+
+  permissionMode: PermissionMode;
+  setPermissionMode: (mode: PermissionMode) => void;
 
   rightPanelOpen: boolean;
   openRightPanel: () => void;
@@ -234,6 +239,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   thinkingLevel: DEFAULT_THINKING_LEVEL,
   setThinkingLevel: (level) => set({ thinkingLevel: level }),
+
+  permissionMode: "default" as PermissionMode,
+  setPermissionMode: (mode) => set({ permissionMode: mode }),
 
   rightPanelOpen: false,
   openRightPanel: () => set({ rightPanelOpen: true }),

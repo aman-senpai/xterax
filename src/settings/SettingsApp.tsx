@@ -8,6 +8,7 @@ import {
   InformationCircleIcon,
   PaintBoardIcon,
   Settings01Icon,
+  ShieldIcon,
   UserMultiple02Icon,
   KeyboardIcon,
 } from "@hugeicons/core-free-icons";
@@ -18,6 +19,7 @@ import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
+import { PermissionsSection } from "./sections/PermissionsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
 
@@ -26,6 +28,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings01Icon, compo
     { id: "general", label: "General", icon: Settings01Icon, component: GeneralSection },
     { id: "themes", label: "Themes", icon: PaintBoardIcon, component: ThemesSection },
     { id: "shortcuts", label: "Shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
+    { id: "permissions", label: "Permissions", icon: ShieldIcon, component: PermissionsSection },
     { id: "models", label: "Models", icon: AiScanIcon, component: ModelsSection },
     { id: "agents", label: "Agents", icon: UserMultiple02Icon, component: AgentsSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
@@ -35,6 +38,7 @@ const VALID_TABS: SettingsTab[] = [
   "general",
   "themes",
   "shortcuts",
+  "permissions",
   "models",
   "agents",
   "about",

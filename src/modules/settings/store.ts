@@ -53,6 +53,30 @@ export const EDITOR_THEME_LABELS: Record<EditorThemeId, string> = {
   "xcode-light": "Xcode Light",
 };
 
+export type ToolApprovalPolicy = "ask" | "auto-approve" | "deny";
+
+export type ToolPermissions = {
+  bash_run: ToolApprovalPolicy;
+  bash_background: ToolApprovalPolicy;
+  write_file: ToolApprovalPolicy;
+  edit: ToolApprovalPolicy;
+  multi_edit: ToolApprovalPolicy;
+  create_directory: ToolApprovalPolicy;
+  spawn_coding_agent: ToolApprovalPolicy;
+  send_to_agent: ToolApprovalPolicy;
+};
+
+export type ShellAllowlistEntry = {
+  pattern: string;
+  enabled: boolean;
+};
+
+export type PermissionSettings = {
+  toolPermissions: ToolPermissions;
+  shellAllowlist: ShellAllowlistEntry[];
+  writableDirectories: string[];
+};
+
 export type Preferences = {
   theme: ThemePref;
   themeId: string;
@@ -98,6 +122,7 @@ export type Preferences = {
   shortcuts: Record<ShortcutId, KeyBinding[]>;
   editorAutoSave: boolean;
   editorAutoSaveDelay: number;
+  permissions: PermissionSettings;
 };
 
 const STORE_PATH = "terax-settings.json";
@@ -146,6 +171,7 @@ const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
 const KEY_SHORTCUTS = "shortcuts";
 const KEY_EDITOR_AUTO_SAVE = "editorAutoSave";
 const KEY_EDITOR_AUTO_SAVE_DELAY = "editorAutoSaveDelay";
+const KEY_PERMISSIONS = "permissions";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -161,6 +187,35 @@ export const TERMINAL_SCROLLBACK_MAX = 50_000;
 export const TERMINAL_SCROLLBACK_PRESETS = [
   500, 1000, 2000, 5000, 10_000, 25_000,
 ] as const;
+
+export const DEFAULT_PERMISSIONS: PermissionSettings = {
+  toolPermissions: {
+    bash_run: "ask",
+    bash_background: "ask",
+    write_file: "ask",
+    edit: "ask",
+    multi_edit: "ask",
+    create_directory: "ask",
+    spawn_coding_agent: "ask",
+    send_to_agent: "ask",
+  },
+  shellAllowlist: [
+    { pattern: "npm test", enabled: false },
+    { pattern: "npm run *", enabled: false },
+    { pattern: "pnpm *", enabled: false },
+    { pattern: "git status", enabled: false },
+    { pattern: "git diff", enabled: false },
+    { pattern: "git add *", enabled: false },
+    { pattern: "git commit *", enabled: false },
+    { pattern: "cargo build", enabled: false },
+    { pattern: "cargo test", enabled: false },
+    { pattern: "cargo check", enabled: false },
+    { pattern: "ls *", enabled: false },
+    { pattern: "cat *", enabled: false },
+    { pattern: "echo *", enabled: false },
+  ],
+  writableDirectories: [],
+};
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "system",
@@ -207,6 +262,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
   editorAutoSave: false,
   editorAutoSaveDelay: 1000,
+  permissions: DEFAULT_PERMISSIONS,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -358,6 +414,9 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_EDITOR_AUTO_SAVE_DELAY) ??
         DEFAULT_PREFERENCES.editorAutoSaveDelay,
     ),
+    permissions:
+      get<PermissionSettings>(KEY_PERMISSIONS) ??
+      DEFAULT_PREFERENCES.permissions,
   };
 }
 
@@ -581,6 +640,12 @@ export async function setAgentNotifications(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_NOTIFICATIONS, value);
 }
 
+export async function setPermissions(
+  value: PermissionSettings,
+): Promise<void> {
+  await writePref(KEY_PERMISSIONS, value);
+}
+
 export async function setShortcuts(
   value: Record<ShortcutId, KeyBinding[]> | {},
 ): Promise<void> {
@@ -642,6 +707,7 @@ export async function onPreferencesChange(
     [KEY_SHORTCUTS]: "shortcuts",
     [KEY_EDITOR_AUTO_SAVE]: "editorAutoSave",
     [KEY_EDITOR_AUTO_SAVE_DELAY]: "editorAutoSaveDelay",
+    [KEY_PERMISSIONS]: "permissions",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().
