@@ -74,13 +74,24 @@ export function createCommandItems(
     : 0;
   const onlyOneTab = ctx.tabs.length < 2;
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
-  const splitDisabled = !activeTerminalTab
-    ? "No terminal tab"
-    : activePaneCount >= MAX_PANES_PER_TAB
-      ? "Pane limit"
-      : undefined;
+  const splitDisabled = !activeTab
+    ? "No active tab"
+    : activeTab.kind === "terminal"
+      ? (activeTab.blocks
+          ? "Blocks terminal cannot split"
+          : activePaneCount >= MAX_PANES_PER_TAB
+            ? "Pane limit"
+            : undefined)
+      : activeTab.split
+        ? "Tab already split"
+        : undefined;
+  const canClosePane = activeTab
+    ? (activeTab.kind === "terminal"
+        ? activePaneCount > 1
+        : !!activeTab.split)
+    : false;
   const closeDisabled =
-    onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
+    onlyOneTab && !canClosePane ? "Last tab" : undefined;
 
   return [
     {

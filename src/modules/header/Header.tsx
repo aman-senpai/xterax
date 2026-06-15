@@ -98,9 +98,21 @@ export function Header({
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminal = activeTab?.kind === "terminal" && !activeTab.blocks;
-  const paneCount = isTerminal ? leafIds((activeTab as any).paneTree).length : 0;
-  const canSplit = isTerminal && paneCount < MAX_PANES_PER_TAB;
-  const canClosePane = isTerminal && paneCount > 1;
+  const paneCount = isTerminal
+    ? leafIds((activeTab as any).paneTree).length
+    : 0;
+  const canSplit = activeTab
+    ? isTerminal
+      ? paneCount < MAX_PANES_PER_TAB
+      : !activeTab.split
+    : false;
+  const canClosePane = activeTab
+    ? isTerminal
+      ? paneCount > 1
+      : !!activeTab.split
+    : false;
+  const showSplitControls =
+    !!activeTab && !(activeTab.kind === "terminal" && activeTab.blocks);
 
   const settingsButton = (
     <Button
@@ -180,7 +192,7 @@ export function Header({
 
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />
 
-      {isTerminal && (
+      {showSplitControls && (
         <div className="flex items-center gap-0.5 animate-in fade-in duration-200">
           <Button
             variant="ghost"
@@ -190,7 +202,11 @@ export function Header({
             disabled={!canSplit}
             title="Split Pane Right (Vertical Split)"
           >
-            <HugeiconsIcon icon={LayoutTwoColumnIcon} size={15} strokeWidth={1.75} />
+            <HugeiconsIcon
+              icon={LayoutTwoColumnIcon}
+              size={15}
+              strokeWidth={1.75}
+            />
           </Button>
           <Button
             variant="ghost"
@@ -200,7 +216,11 @@ export function Header({
             disabled={!canSplit}
             title="Split Pane Down (Horizontal Split)"
           >
-            <HugeiconsIcon icon={LayoutTwoRowIcon} size={15} strokeWidth={1.75} />
+            <HugeiconsIcon
+              icon={LayoutTwoRowIcon}
+              size={15}
+              strokeWidth={1.75}
+            />
           </Button>
           {canClosePane && (
             <Button

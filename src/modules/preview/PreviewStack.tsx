@@ -2,12 +2,17 @@ import { cn } from "@/lib/utils";
 import type { PreviewTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
 import { PreviewPane, type PreviewPaneHandle } from "./PreviewPane";
+import { SplitPaneWrapper } from "@/modules/terminal/SplitPaneWrapper";
 
 type Props = {
   tabs: Tab[];
   activeId: number;
   onUrlChange: (id: number, url: string) => void;
   registerHandle: (id: number, handle: PreviewPaneHandle | null) => void;
+  registerTerminalHandle: (leafId: number, handle: any) => void;
+  onSearchReady: (leafId: number, addon: any) => void;
+  onCwd: (leafId: number, cwd: string) => void;
+  onExit: (leafId: number, code: number) => void;
 };
 
 export function PreviewStack({
@@ -15,6 +20,10 @@ export function PreviewStack({
   activeId,
   onUrlChange,
   registerHandle,
+  registerTerminalHandle,
+  onSearchReady,
+  onCwd,
+  onExit,
 }: Props) {
   const previews = tabs.filter(
     (t): t is PreviewTab => t.kind === "preview" && !t.cold,
@@ -66,6 +75,15 @@ export function PreviewStack({
     <div className="relative h-full w-full">
       {previews.map((t) => {
         const visible = t.id === activeId;
+        const paneContent = (
+          <PreviewPane
+            ref={getRefCallback(t.id)}
+            url={t.url}
+            visible={visible}
+            onUrlChange={getUrlCallback(t.id)}
+          />
+        );
+
         return (
           <div
             key={t.id}
@@ -75,12 +93,22 @@ export function PreviewStack({
             )}
             aria-hidden={!visible}
           >
-            <PreviewPane
-              ref={getRefCallback(t.id)}
-              url={t.url}
-              visible={visible}
-              onUrlChange={getUrlCallback(t.id)}
-            />
+            {t.split ? (
+              <SplitPaneWrapper
+                dir={t.split.dir}
+                terminalLeafId={t.split.terminalLeafId}
+                terminalCwd={t.split.terminalCwd}
+                tabVisible={visible}
+                registerTerminalHandle={registerTerminalHandle}
+                onSearchReady={onSearchReady}
+                onCwd={onCwd}
+                onExit={onExit}
+              >
+                {paneContent}
+              </SplitPaneWrapper>
+            ) : (
+              paneContent
+            )}
           </div>
         );
       })}

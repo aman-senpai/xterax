@@ -136,6 +136,7 @@ export default function App() {
     focusPane,
     focusNextPaneInTab,
     splitActivePane,
+    splitFileTab,
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
@@ -146,11 +147,14 @@ export default function App() {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
-  const activeTerminalTab = useMemo(() => {
-    const t = tabs.find((x) => x.id === activeId);
-    return t && t.kind === "terminal" ? t : null;
-  }, [tabs, activeId]);
-  const activeLeafId = activeTerminalTab?.activeLeafId ?? null;
+  const activeTab = tabs.find((x) => x.id === activeId);
+  const activeTerminalTab = activeTab?.kind === "terminal" ? activeTab : null;
+  const activeLeafId = useMemo(() => {
+    if (!activeTab) return null;
+    if (activeTab.kind === "terminal") return activeTab.activeLeafId;
+    if (activeTab.split) return activeTab.split.terminalLeafId;
+    return null;
+  }, [activeTab]);
 
   const searchAddons = useRef<Map<number, SearchAddon>>(new Map());
   const [activeSearchAddon, setActiveSearchAddon] =
@@ -312,7 +316,6 @@ export default function App() {
 
   const { hasComposer } = useAiBootstrap();
 
-  const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
   const isBlockTab = activeTerminalTab?.blocks === true;
   const isEditorTab = activeTab?.kind === "editor";
@@ -377,6 +380,8 @@ export default function App() {
     for (const t of tabs) {
       if (t.kind === "terminal") {
         for (const id of leafIds(t.paneTree)) live.add(id);
+      } else if (t.split) {
+        live.add(t.split.terminalLeafId);
       }
     }
     for (const id of liveLeavesRef.current) {
@@ -557,7 +562,9 @@ export default function App() {
       ? (findLeafCwd(activeTab.paneTree, activeTab.activeLeafId) ??
         activeTab.cwd ??
         null)
-      : null;
+      : activeTab?.split
+        ? (activeTab.split.terminalCwd ?? null)
+        : null;
 
   const activeFilePath = (() => {
     if (activeTab?.kind === "editor") return activeTab.path;
@@ -610,15 +617,23 @@ export default function App() {
   const splitActivePaneInActiveTab = useCallback(
     (dir: "row" | "col") => {
       const t = tabsRef.current.find((x) => x.id === activeId);
-      if (!t || t.kind !== "terminal") return;
-      splitActivePane(activeId, dir);
+      if (!t) return;
+      if (t.kind === "terminal") {
+        splitActivePane(activeId, dir);
+      } else {
+        splitFileTab(activeId, dir);
+      }
     },
-    [activeId, splitActivePane],
+    [activeId, splitActivePane, splitFileTab],
   );
 
   const handleCloseTabOrPane = useCallback(() => {
     const t = tabsRef.current.find((x) => x.id === activeId);
     if (t?.kind === "terminal" && leafIds(t.paneTree).length > 1) {
+      closeActivePane(activeId);
+      return;
+    }
+    if (t && t.kind !== "terminal" && t.split) {
       closeActivePane(activeId);
       return;
     }
@@ -1175,7 +1190,7 @@ export default function App() {
                 collapsible
                 collapsedSize={0}
                 defaultSize={rightPanelWidthRef.current}
-                minSize="20%"
+                minSize="25%"
                 maxSize="50%"
                 onResize={(size) => {
                   if (size.asPercentage > 0) {

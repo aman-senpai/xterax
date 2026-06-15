@@ -21,6 +21,11 @@ type TabBase = {
   spaceId: string;
   /** Restored from disk, not yet activated: rendered as a placeholder, not mounted. */
   cold?: boolean;
+  split?: {
+    dir: SplitDir;
+    terminalLeafId: number;
+    terminalCwd?: string;
+  };
 };
 
 export type TerminalTab = TabBase & {
@@ -869,13 +874,26 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     setTabs((curr) => {
       let changed = false;
       const next = curr.map((t) => {
-        if (t.kind !== "terminal" || !hasLeaf(t.paneTree, leafId)) return t;
-        const paneTree = setLeafCwdInTree(t.paneTree, leafId, cwd);
-        const isActive = t.activeLeafId === leafId;
-        const cwdChanged = isActive && t.cwd !== cwd;
-        if (paneTree === t.paneTree && !cwdChanged) return t;
-        changed = true;
-        return { ...t, paneTree, ...(cwdChanged && { cwd }) };
+        if (t.kind === "terminal") {
+          if (!hasLeaf(t.paneTree, leafId)) return t;
+          const paneTree = setLeafCwdInTree(t.paneTree, leafId, cwd);
+          const isActive = t.activeLeafId === leafId;
+          const cwdChanged = isActive && t.cwd !== cwd;
+          if (paneTree === t.paneTree && !cwdChanged) return t;
+          changed = true;
+          return { ...t, paneTree, ...(cwdChanged && { cwd }) };
+        } else if (t.split && t.split.terminalLeafId === leafId) {
+          if (t.split.terminalCwd === cwd) return t;
+          changed = true;
+          return {
+            ...t,
+            split: {
+              ...t.split,
+              terminalCwd: cwd,
+            },
+          };
+        }
+        return t;
       });
       return changed ? next : curr;
     });
@@ -884,15 +902,20 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const focusPane = useCallback((tabId: number, leafId: number) => {
     setTabs((curr) =>
       curr.map((t) => {
-        if (t.id !== tabId || t.kind !== "terminal") return t;
-        if (!hasLeaf(t.paneTree, leafId)) return t;
-        if (t.activeLeafId === leafId) return t;
-        const cwd = findLeafCwd(t.paneTree, leafId);
-        return {
-          ...t,
-          activeLeafId: leafId,
-          ...(cwd !== undefined && { cwd }),
-        };
+        if (t.id !== tabId) return t;
+        if (t.kind === "terminal") {
+          if (!hasLeaf(t.paneTree, leafId)) return t;
+          if (t.activeLeafId === leafId) return t;
+          const cwd = findLeafCwd(t.paneTree, leafId);
+          return {
+            ...t,
+            activeLeafId: leafId,
+            ...(cwd !== undefined && { cwd }),
+          };
+        } else if (t.split && t.split.terminalLeafId === leafId) {
+          return t;
+        }
+        return t;
       }),
     );
   }, []);
@@ -940,30 +963,38 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     let didRemove = false;
     setTabs((curr) => {
       const tab = curr.find(
-        (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
+        (t) =>
+          (t.kind === "terminal" && hasLeaf(t.paneTree, leafId)) ||
+          (t.kind !== "terminal" && t.split?.terminalLeafId === leafId),
       );
-      if (tab?.kind !== "terminal") return curr;
-      const newTree = removeLeaf(tab.paneTree, leafId);
-      if (newTree === null) {
-        const fallback = nextActiveInSpace(curr, tab.id);
-        if (fallback === null) return curr;
-        const next = curr.filter((x) => x.id !== tab.id);
-        setActiveId((active) => (active === tab.id ? fallback : active));
+      if (!tab) return curr;
+      if (tab.kind === "terminal") {
+        const newTree = removeLeaf(tab.paneTree, leafId);
+        if (newTree === null) {
+          const fallback = nextActiveInSpace(curr, tab.id);
+          if (fallback === null) return curr;
+          const next = curr.filter((x) => x.id !== tab.id);
+          setActiveId((active) => (active === tab.id ? fallback : active));
+          didRemove = true;
+          return next;
+        }
+        const remaining = leafIds(newTree);
+        let newActive = tab.activeLeafId;
+        if (tab.activeLeafId === leafId) {
+          const sib = siblingLeafOf(tab.paneTree, leafId);
+          newActive = sib && remaining.includes(sib) ? sib : remaining[0];
+        }
         didRemove = true;
-        return next;
+        return curr.map((x) =>
+          x.id === tab.id
+            ? { ...x, paneTree: newTree, activeLeafId: newActive }
+            : x,
+        );
+      } else {
+        didRemove = true;
+        const { split, ...rest } = tab;
+        return curr.map((x) => (x.id === tab.id ? (rest as Tab) : x));
       }
-      const remaining = leafIds(newTree);
-      let newActive = tab.activeLeafId;
-      if (tab.activeLeafId === leafId) {
-        const sib = siblingLeafOf(tab.paneTree, leafId);
-        newActive = sib && remaining.includes(sib) ? sib : remaining[0];
-      }
-      didRemove = true;
-      return curr.map((x) =>
-        x.id === tab.id
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
-          : x,
-      );
     });
     if (didRemove) disposeSession(leafId);
   }, []);
@@ -973,30 +1004,57 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     let removedLeaf: number | null = null;
     setTabs((curr) => {
       const t = curr.find((x) => x.id === tabId);
-      if (t?.kind !== "terminal") return curr;
-      const target = t.activeLeafId;
-      const newTree = removeLeaf(t.paneTree, target);
-      if (newTree === null) {
-        const fallback = nextActiveInSpace(curr, tabId);
-        if (fallback === null) return curr;
-        const next = curr.filter((x) => x.id !== tabId);
-        setActiveId((active) => (active === tabId ? fallback : active));
-        closedTab = true;
+      if (!t) return curr;
+      if (t.kind === "terminal") {
+        const target = t.activeLeafId;
+        const newTree = removeLeaf(t.paneTree, target);
+        if (newTree === null) {
+          const fallback = nextActiveInSpace(curr, tabId);
+          if (fallback === null) return curr;
+          const next = curr.filter((x) => x.id !== tabId);
+          setActiveId((active) => (active === tabId ? fallback : active));
+          closedTab = true;
+          removedLeaf = target;
+          return next;
+        }
+        const remaining = leafIds(newTree);
+        const sib = siblingLeafOf(t.paneTree, target);
+        const newActive = sib && remaining.includes(sib) ? sib : remaining[0];
         removedLeaf = target;
-        return next;
+        return curr.map((x) =>
+          x.id === tabId
+            ? { ...x, paneTree: newTree, activeLeafId: newActive }
+            : x,
+        );
+      } else if (t.split) {
+        removedLeaf = t.split.terminalLeafId;
+        const { split, ...rest } = t;
+        return curr.map((x) => (x.id === tabId ? (rest as Tab) : x));
       }
-      const remaining = leafIds(newTree);
-      const sib = siblingLeafOf(t.paneTree, target);
-      const newActive = sib && remaining.includes(sib) ? sib : remaining[0];
-      removedLeaf = target;
-      return curr.map((x) =>
-        x.id === tabId
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
-          : x,
-      );
+      return curr;
     });
     if (removedLeaf !== null) disposeSession(removedLeaf);
     return closedTab;
+  }, []);
+
+  const splitFileTab = useCallback((tabId: number, dir: SplitDir): number | null => {
+    let newLeafId: number | null = null;
+    setTabs((curr) =>
+      curr.map((t) => {
+        if (t.id !== tabId || t.kind === "terminal" || t.split) return t;
+        const leafId = nextIdRef.current++;
+        newLeafId = leafId;
+        return {
+          ...t,
+          split: {
+            dir,
+            terminalLeafId: leafId,
+            terminalCwd: (t as any).cwd,
+          },
+        };
+      }),
+    );
+    return newLeafId;
   }, []);
 
   const resetWorkspace = useCallback((cwd?: string) => {
@@ -1057,6 +1115,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     focusPane,
     focusNextPaneInTab,
     splitActivePane,
+    splitFileTab,
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,

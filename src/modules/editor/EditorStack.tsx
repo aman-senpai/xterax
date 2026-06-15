@@ -3,6 +3,7 @@ import { MarkdownViewToggle } from "@/modules/markdown";
 import type { EditorTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
 import { EditorPane, type EditorPaneHandle } from "./EditorPane";
+import { SplitPaneWrapper } from "@/modules/terminal/SplitPaneWrapper";
 
 type Props = {
   tabs: Tab[];
@@ -11,6 +12,10 @@ type Props = {
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
   onCloseTab: (id: number) => void;
   onSetMarkdownView: (id: number, mode: "rendered" | "raw") => void;
+  registerTerminalHandle: (leafId: number, handle: any) => void;
+  onSearchReady: (leafId: number, addon: any) => void;
+  onCwd: (leafId: number, cwd: string) => void;
+  onExit: (leafId: number, code: number) => void;
 };
 
 export function EditorStack({
@@ -20,6 +25,10 @@ export function EditorStack({
   registerHandle,
   onCloseTab,
   onSetMarkdownView,
+  registerTerminalHandle,
+  onSearchReady,
+  onCwd,
+  onExit,
 }: Props) {
   const editors = tabs.filter(
     (t): t is EditorTab => t.kind === "editor" && !t.cold,
@@ -92,6 +101,25 @@ export function EditorStack({
     <div className="relative h-full w-full">
       {editors.map((t) => {
         const visible = t.id === activeId;
+        const paneContent = (
+          <div className="relative h-full overflow-hidden rounded-md border border-border/60 bg-background">
+            {isMarkdownPath(t.path) && (
+              <MarkdownViewToggle
+                mode="raw"
+                onChange={(mode) => onSetMarkdownView(t.id, mode)}
+                renderedDisabled={t.dirty}
+                renderedHint="Save to preview"
+              />
+            )}
+            <EditorPane
+              ref={getRefCallback(t.id)}
+              path={t.path}
+              onDirtyChange={getDirtyCallback(t.id)}
+              onClose={getCloseCallback(t.id)}
+            />
+          </div>
+        );
+
         return (
           <div
             key={t.id}
@@ -101,22 +129,22 @@ export function EditorStack({
             )}
             aria-hidden={!visible}
           >
-            <div className="relative h-full overflow-hidden rounded-md border border-border/60 bg-background">
-              {isMarkdownPath(t.path) && (
-                <MarkdownViewToggle
-                  mode="raw"
-                  onChange={(mode) => onSetMarkdownView(t.id, mode)}
-                  renderedDisabled={t.dirty}
-                  renderedHint="Save to preview"
-                />
-              )}
-              <EditorPane
-                ref={getRefCallback(t.id)}
-                path={t.path}
-                onDirtyChange={getDirtyCallback(t.id)}
-                onClose={getCloseCallback(t.id)}
-              />
-            </div>
+            {t.split ? (
+              <SplitPaneWrapper
+                dir={t.split.dir}
+                terminalLeafId={t.split.terminalLeafId}
+                terminalCwd={t.split.terminalCwd}
+                tabVisible={visible}
+                registerTerminalHandle={registerTerminalHandle}
+                onSearchReady={onSearchReady}
+                onCwd={onCwd}
+                onExit={onExit}
+              >
+                {paneContent}
+              </SplitPaneWrapper>
+            ) : (
+              paneContent
+            )}
           </div>
         );
       })}

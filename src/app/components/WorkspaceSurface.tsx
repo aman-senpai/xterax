@@ -101,6 +101,10 @@ export function WorkspaceSurface({
           onDirtyChange={onEditorDirtyChange}
           onCloseTab={onEditorCloseTab}
           onSetMarkdownView={onSetMarkdownView}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
         />
       </div>
       <div
@@ -115,6 +119,10 @@ export function WorkspaceSurface({
           activeId={activeId}
           registerHandle={registerPreviewHandle}
           onUrlChange={onPreviewUrlChange}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
         />
       </div>
       <div
@@ -128,6 +136,10 @@ export function WorkspaceSurface({
           tabs={tabs}
           activeId={activeId}
           onSetMarkdownView={onSetMarkdownView}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
         />
       </div>
       <div
@@ -142,6 +154,10 @@ export function WorkspaceSurface({
           activeId={activeId}
           onAccept={onAiDiffAccept}
           onReject={onAiDiffReject}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
         />
       </div>
       <div
@@ -151,7 +167,14 @@ export function WorkspaceSurface({
         )}
         aria-hidden={!isGitDiffTab}
       >
-        <GitDiffStack tabs={tabs} activeId={activeId} />
+        <GitDiffStack
+          tabs={tabs}
+          activeId={activeId}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
+        />
       </div>
       <div
         className={cn(
@@ -165,6 +188,10 @@ export function WorkspaceSurface({
           activeId={activeId}
           onOpenCommitFile={onOpenCommitFile}
           onSearchHandle={onGitHistorySearchHandle}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
         />
       </div>
     </div>
