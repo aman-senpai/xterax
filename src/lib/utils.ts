@@ -8,3 +8,7 @@ export function cn(...inputs: ClassValue[]) {
 export function isMarkdownPath(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path);
 }
+
+export function isCsvPath(path: string): boolean {
+  return /\.(csv|tsv|dsv)$/i.test(path);
+}

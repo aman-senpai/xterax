@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { AiDiffStack, EditorStack, GitDiffStack } from "@/modules/editor";
 import { GitHistoryStack } from "@/modules/git-history";
+import { CsvStack } from "@/modules/csv";
 import { MarkdownStack } from "@/modules/markdown";
 import { PreviewStack } from "@/modules/preview";
 import type { Tab } from "@/modules/tabs";
@@ -32,6 +33,7 @@ type Props = {
   onOpenCommitFile: GitHistoryStackProps["onOpenCommitFile"];
   onGitHistorySearchHandle: GitHistoryStackProps["onSearchHandle"];
   onSetMarkdownView: EditorStackProps["onSetMarkdownView"];
+  onSetCsvView: EditorStackProps["onSetCsvView"];
 };
 
 /**
@@ -58,12 +60,14 @@ export function WorkspaceSurface({
   onOpenCommitFile,
   onGitHistorySearchHandle,
   onSetMarkdownView,
+  onSetCsvView,
 }: Props) {
   const kind = activeTab?.kind;
   const isTerminalTab = kind === "terminal";
   const isEditorTab = kind === "editor";
   const isPreviewTab = kind === "preview";
   const isMarkdownTab = kind === "markdown";
+  const isCsvTab = kind === "csv";
   const isAiDiffTab = kind === "ai-diff";
   const isGitDiffTab = kind === "git-diff" || kind === "git-commit-file";
   const isGitHistoryTab = kind === "git-history";
@@ -101,6 +105,7 @@ export function WorkspaceSurface({
           onDirtyChange={onEditorDirtyChange}
           onCloseTab={onEditorCloseTab}
           onSetMarkdownView={onSetMarkdownView}
+          onSetCsvView={onSetCsvView}
           registerTerminalHandle={registerTerminalHandle}
           onSearchReady={onSearchReady}
           onCwd={onCwd}
@@ -136,6 +141,23 @@ export function WorkspaceSurface({
           tabs={tabs}
           activeId={activeId}
           onSetMarkdownView={onSetMarkdownView}
+          registerTerminalHandle={registerTerminalHandle}
+          onSearchReady={onSearchReady}
+          onCwd={onCwd}
+          onExit={onExit}
+        />
+      </div>
+      <div
+        className={cn(
+          "absolute inset-0 px-3 pt-2 pb-2",
+          !isCsvTab && "invisible pointer-events-none",
+        )}
+        aria-hidden={!isCsvTab}
+      >
+        <CsvStack
+          tabs={tabs}
+          activeId={activeId}
+          onSetCsvView={onSetCsvView}
           registerTerminalHandle={registerTerminalHandle}
           onSearchReady={onSearchReady}
           onCwd={onCwd}

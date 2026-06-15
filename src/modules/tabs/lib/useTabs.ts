@@ -1,4 +1,4 @@
-import { isMarkdownPath } from "@/lib/utils";
+import { isCsvPath, isMarkdownPath } from "@/lib/utils";
 import {
   findLeafCwd,
   hasLeaf,
@@ -70,6 +70,13 @@ export type MarkdownTab = TabBase & {
   path: string;
 };
 
+export type CsvTab = TabBase & {
+  id: number;
+  kind: "csv";
+  title: string;
+  path: string;
+};
+
 export type AiDiffStatus = "pending" | "approved" | "rejected";
 
 export type AiDiffTab = TabBase & {
@@ -120,6 +127,7 @@ export type Tab =
   | EditorTab
   | PreviewTab
   | MarkdownTab
+  | CsvTab
   | AiDiffTab
   | GitDiffTab
   | GitHistoryTab
@@ -612,6 +620,33 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     return targetId;
   }, []);
 
+  const newCsvTab = useCallback((path: string) => {
+    let targetId: number | null = null;
+    setTabs((curr) => {
+      const existing = curr.find(
+        (t) => t.kind === "csv" && t.path === path,
+      );
+      if (existing) {
+        targetId = existing.id;
+        return curr;
+      }
+      const id = nextIdRef.current++;
+      targetId = id;
+      return [
+        ...curr,
+        {
+          id,
+          kind: "csv" as const,
+          spaceId: activeSpaceIdRef.current,
+          title: basename(path),
+          path,
+        } satisfies CsvTab,
+      ];
+    });
+    if (targetId !== null) setActiveId(targetId);
+    return targetId;
+  }, []);
+
   const setMarkdownView = useCallback(
     (id: number, mode: "rendered" | "raw") => {
       setTabs((curr) =>
@@ -639,6 +674,41 @@ export function useTabs(initial?: Partial<TerminalTab>) {
               title: t.title,
               path: t.path,
             };
+          }
+          return t;
+        }),
+      );
+    },
+    [],
+  );
+
+  const setCsvView = useCallback(
+    (id: number, mode: "spreadsheet" | "raw") => {
+      setTabs((curr) =>
+        curr.map((t) => {
+          if (
+            t.id !== id ||
+            !isCsvPath((t as { path?: string }).path ?? "")
+          )
+            return t;
+          if (mode === "raw" && t.kind === "csv") {
+            return {
+              ...t,
+              kind: "editor" as const,
+              dirty: false,
+              preview: false,
+            };
+          }
+          if (mode === "spreadsheet" && t.kind === "editor") {
+            if (t.dirty) return t;
+            return {
+              id: t.id,
+              kind: "csv" as const,
+              spaceId: t.spaceId,
+              cold: t.cold,
+              title: t.title,
+              path: t.path,
+            } satisfies CsvTab;
           }
           return t;
         }),
@@ -1102,6 +1172,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     newPreviewTab,
     newMarkdownTab,
     setMarkdownView,
+    newCsvTab,
+    setCsvView,
     openAiDiffTab,
     openGitDiffTab,
     openCommitHistoryTab,

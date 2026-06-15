@@ -38,7 +38,7 @@ import {
 import type { PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { isMarkdownPath } from "@/lib/utils";
+import { isCsvPath, isMarkdownPath } from "@/lib/utils";
 import {
   useGlobalShortcuts,
   type ShortcutHandlers,
@@ -124,6 +124,8 @@ export default function App() {
     newPreviewTab,
     newMarkdownTab,
     setMarkdownView,
+    newCsvTab,
+    setCsvView,
     openAiDiffTab,
     closeAiDiffTab,
     openGitDiffTab,
@@ -527,13 +529,15 @@ export default function App() {
 
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean) => {
-      // Markdown opens in its rendered view by default; a per-tab toggle flips
-      // it to the raw editor. Other files default to preview (pin=false);
+      // Markdown opens in its rendered view by default.
+      // CSV opens in spreadsheet view by default.
+      // Other files default to preview (pin=false);
       // explicit actions like context-menu "Open" pass pin=true to persist.
       if (isMarkdownPath(path)) newMarkdownTab(path);
+      else if (isCsvPath(path)) newCsvTab(path);
       else openFileTab(path, pin ?? false);
     },
-    [openFileTab, newMarkdownTab],
+    [openFileTab, newMarkdownTab, newCsvTab],
   );
 
   const handlePathRenamed = useCallback(
@@ -1169,6 +1173,7 @@ export default function App() {
                       onOpenCommitFile={openCommitFileDiffTab}
                       onGitHistorySearchHandle={setGitHistoryHandle}
                       onSetMarkdownView={setMarkdownView}
+                      onSetCsvView={setCsvView}
                     />
                   </div>
                   <WorkspaceInputBar

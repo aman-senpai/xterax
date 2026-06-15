@@ -1,7 +1,128 @@
 import type { Extension } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { RangeSetBuilder } from "@codemirror/state";
 
 type LoaderResult = Extension | { token: unknown };
 type LanguageLoader = () => Promise<LoaderResult>;
+
+// ---------------------------------------------------------------------------
+// Rainbow-CSV ViewPlugin — no external language pack required.
+// ---------------------------------------------------------------------------
+
+/** Split a CSV/TSV line into cell spans, honouring double-quoted fields. */
+function parseCsvLine(
+  text: string,
+  sep: string,
+): Array<{ from: number; to: number; col: number }> {
+  const spans: Array<{ from: number; to: number; col: number }> = [];
+  let col = 0;
+  let i = 0;
+  let cellStart = 0;
+  const isTsv = sep === "\t";
+
+  while (i <= text.length) {
+    // Consume a quoted field (only for comma/dsv, not tsv)
+    if (!isTsv && i < text.length && text[i] === '"') {
+      i++; // skip opening quote
+      while (i < text.length) {
+        if (text[i] === '"') {
+          i++;
+          if (i < text.length && text[i] === '"') {
+            i++; // escaped quote
+          } else {
+            break; // end of quoted field
+          }
+        } else {
+          i++;
+        }
+      }
+    }
+
+    // Advance to next separator or end
+    const sepIdx = text.indexOf(sep, i);
+    const end = sepIdx === -1 ? text.length : sepIdx;
+
+    spans.push({ from: cellStart, to: end, col: col % 10 });
+    col++;
+
+    if (sepIdx === -1) break;
+    i = sepIdx + 1;
+    cellStart = i;
+  }
+  return spans;
+}
+
+/** 10 distinct hues cycling through the spectrum. */
+const RAINBOW_MARK = Array.from({ length: 10 }, (_, i) =>
+  Decoration.mark({ class: `csv-col-${i}` }),
+);
+
+function buildDecorations(view: EditorView, sep: string): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const { from, to } of view.visibleRanges) {
+    let pos = from;
+    while (pos <= to) {
+      const line = view.state.doc.lineAt(pos);
+      const lineText = line.text;
+      if (lineText.trim().length > 0) {
+        const spans = parseCsvLine(lineText, sep);
+        for (const { from: f, to: t, col } of spans) {
+          const absFrom = line.from + f;
+          const absTo = line.from + t;
+          if (absFrom < absTo && absFrom >= from && absTo <= view.state.doc.length + 1) {
+            builder.add(absFrom, absTo, RAINBOW_MARK[col]);
+          }
+        }
+      }
+      pos = line.to + 1;
+    }
+  }
+  return builder.finish();
+}
+
+function buildRainbowCsvExtension(sep: string): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = buildDecorations(view, sep);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildDecorations(update.view, sep);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+
+  const theme = EditorView.baseTheme({
+    // Light-mode: rich saturated hues
+    ".csv-col-0": { color: "oklch(0.48 0.18 25)" },   // red-orange
+    ".csv-col-1": { color: "oklch(0.50 0.16 55)" },   // amber
+    ".csv-col-2": { color: "oklch(0.48 0.17 145)" },  // green
+    ".csv-col-3": { color: "oklch(0.50 0.18 240)" },  // blue
+    ".csv-col-4": { color: "oklch(0.46 0.20 305)" },  // violet
+    ".csv-col-5": { color: "oklch(0.50 0.17 185)" },  // cyan
+    ".csv-col-6": { color: "oklch(0.52 0.18 340)" },  // pink
+    ".csv-col-7": { color: "oklch(0.50 0.15 95)" },   // yellow-green
+    ".csv-col-8": { color: "oklch(0.50 0.17 195)" },  // teal
+    ".csv-col-9": { color: "oklch(0.46 0.16 270)" },  // indigo
+    // Dark-mode overrides: lighter tints
+    "&dark .csv-col-0, .dark &.csv-col-0, :is(.dark *) .csv-col-0": { color: "oklch(0.80 0.17 25)" },
+    "&dark .csv-col-1, .dark &.csv-col-1, :is(.dark *) .csv-col-1": { color: "oklch(0.82 0.15 55)" },
+    "&dark .csv-col-2, .dark &.csv-col-2, :is(.dark *) .csv-col-2": { color: "oklch(0.80 0.17 145)" },
+    "&dark .csv-col-3, .dark &.csv-col-3, :is(.dark *) .csv-col-3": { color: "oklch(0.82 0.16 240)" },
+    "&dark .csv-col-4, .dark &.csv-col-4, :is(.dark *) .csv-col-4": { color: "oklch(0.80 0.18 305)" },
+    "&dark .csv-col-5, .dark &.csv-col-5, :is(.dark *) .csv-col-5": { color: "oklch(0.82 0.15 185)" },
+    "&dark .csv-col-6, .dark &.csv-col-6, :is(.dark *) .csv-col-6": { color: "oklch(0.80 0.17 340)" },
+    "&dark .csv-col-7, .dark &.csv-col-7, :is(.dark *) .csv-col-7": { color: "oklch(0.82 0.14 95)" },
+    "&dark .csv-col-8, .dark &.csv-col-8, :is(.dark *) .csv-col-8": { color: "oklch(0.80 0.16 195)" },
+    "&dark .csv-col-9, .dark &.csv-col-9, :is(.dark *) .csv-col-9": { color: "oklch(0.80 0.15 270)" },
+  });
+
+  return [plugin, theme];
+}
 
 const rubyLoader: LanguageLoader = () =>
   import("@codemirror/legacy-modes/mode/ruby").then((m) => m.ruby);
@@ -116,10 +237,19 @@ const loaders: Record<string, LanguageLoader> = {
     ),
 
   // LaTeX / TeX
-  tex: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
-  latex: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
-  sty: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
-  cls: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  tex: () =>
+    import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  latex: () =>
+    import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  sty: () =>
+    import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  cls: () =>
+    import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+
+  // CSV / TSV — rainbow column highlighting (no external dep)
+  csv: () => Promise.resolve(buildRainbowCsvExtension(",")),
+  tsv: () => Promise.resolve(buildRainbowCsvExtension("\t")),
+  dsv: () => Promise.resolve(buildRainbowCsvExtension(",")),
 };
 
 const filenameOverrides: Record<string, LanguageLoader> = {

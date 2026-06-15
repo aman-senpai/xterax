@@ -72,7 +72,7 @@ function subtitleFor(tab: Tab): string | null {
     const segs = tab.cwd.split(/[\\/]/).filter(Boolean);
     return segs.slice(-2).join("/") || tab.cwd;
   }
-  if (tab.kind === "editor" || tab.kind === "markdown") {
+  if (tab.kind === "editor" || tab.kind === "markdown" || tab.kind === "csv") {
     const segs = tab.path.split(/[\\/]/).filter(Boolean);
     return segs.slice(-2, -1)[0] ?? null;
   }

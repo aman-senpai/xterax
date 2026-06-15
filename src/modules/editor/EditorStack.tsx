@@ -1,4 +1,5 @@
-import { cn, isMarkdownPath } from "@/lib/utils";
+import { cn, isCsvPath, isMarkdownPath } from "@/lib/utils";
+import { CsvViewToggle } from "@/modules/csv";
 import { MarkdownViewToggle } from "@/modules/markdown";
 import type { EditorTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
@@ -12,6 +13,7 @@ type Props = {
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
   onCloseTab: (id: number) => void;
   onSetMarkdownView: (id: number, mode: "rendered" | "raw") => void;
+  onSetCsvView: (id: number, mode: "spreadsheet" | "raw") => void;
   registerTerminalHandle: (leafId: number, handle: any) => void;
   onSearchReady: (leafId: number, addon: any) => void;
   onCwd: (leafId: number, cwd: string) => void;
@@ -25,6 +27,7 @@ export function EditorStack({
   registerHandle,
   onCloseTab,
   onSetMarkdownView,
+  onSetCsvView,
   registerTerminalHandle,
   onSearchReady,
   onCwd,
@@ -109,6 +112,14 @@ export function EditorStack({
                 onChange={(mode) => onSetMarkdownView(t.id, mode)}
                 renderedDisabled={t.dirty}
                 renderedHint="Save to preview"
+              />
+            )}
+            {isCsvPath(t.path) && (
+              <CsvViewToggle
+                mode="raw"
+                onChange={(mode) => onSetCsvView(t.id, mode)}
+                spreadsheetDisabled={t.dirty}
+                spreadsheetHint="Save to view spreadsheet"
               />
             )}
             <EditorPane

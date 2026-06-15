@@ -4,6 +4,7 @@ import {
   type SplitDir,
 } from "@/modules/terminal/lib/panes";
 import type {
+  CsvTab,
   EditorTab,
   MarkdownTab,
   PreviewTab,
@@ -24,7 +25,8 @@ export type SerializedTab =
     }
   | { kind: "editor"; path: string }
   | { kind: "preview"; url: string }
-  | { kind: "markdown"; path: string };
+  | { kind: "markdown"; path: string }
+  | { kind: "csv"; path: string };
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -61,6 +63,7 @@ export function isSerializableTab(tab: Tab): boolean {
     case "editor":
     case "preview":
     case "markdown":
+    case "csv":
       return true;
     default:
       return false;
@@ -83,6 +86,8 @@ function serializeTab(tab: Tab): SerializedTab | null {
       return { kind: "preview", url: tab.url };
     case "markdown":
       return { kind: "markdown", path: tab.path };
+    case "csv":
+      return { kind: "csv", path: tab.path };
     default:
       return null;
   }
@@ -194,6 +199,15 @@ function hydrateTab(
         title: basename(s.path),
         path: s.path,
       } satisfies MarkdownTab;
+    case "csv":
+      return {
+        id: allocId(),
+        kind: "csv",
+        spaceId,
+        cold: true,
+        title: basename(s.path),
+        path: s.path,
+      } satisfies CsvTab;
     default:
       return null;
   }
