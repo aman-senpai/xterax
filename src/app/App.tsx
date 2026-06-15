@@ -250,10 +250,10 @@ export default function App() {
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [paletteInitialMode, setPaletteInitialMode] = useState<
-    "commands" | "content"
+    "commands" | "files" | "content"
   >("commands");
   const openCommandPalette = useCallback(
-    (mode: "commands" | "content" = "commands") => {
+    (mode: "commands" | "files" | "content" = "commands") => {
       setPaletteInitialMode(mode);
       setCommandPaletteOpen(true);
     },
@@ -600,8 +600,8 @@ export default function App() {
 
   const shortcutHandlers = useMemo<ShortcutHandlers>(
     () => ({
-      "commandPalette.open": () => openCommandPalette("commands"),
-      "commandPalette.content": () => openCommandPalette("content"),
+      "commandPalette.open": () => openCommandPalette("files"),
+      "commandPalette.content": () => openCommandPalette("commands"),
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
@@ -627,6 +627,7 @@ export default function App() {
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
       "search.focus": () => searchInlineRef.current?.focus(),
+      "explorer.search": () => openCommandPalette("content"),
       "ai.toggle": toggleRightPanelAndFocus,
       "ai.askSelection": askFromSelection,
       "panel.toggleRight": toggleRightPanel,

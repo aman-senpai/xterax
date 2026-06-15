@@ -260,7 +260,6 @@ export function createCommandItems(
       group: "Search",
       keywords: ["explorer", "workspace", "file", "open"],
       icon: Search01Icon,
-      shortcutId: "explorer.search",
       disabledReason: ctx.explorerRoot ? undefined : "No workspace root",
       run: ctx.focusExplorerSearch,
     },

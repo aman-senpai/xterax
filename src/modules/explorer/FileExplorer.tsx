@@ -41,7 +41,6 @@ import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 
@@ -339,17 +338,6 @@ export const FileExplorer = memo(
       }),
       [entryPaths, scrollEntryIntoView, selectedPath],
     );
-
-    useGlobalShortcuts({
-      "explorer.search": () => {
-        if (searchRef.current?.isFocused()) {
-          setIsSearchOpen(false);
-          return;
-        }
-        setIsSearchOpen(true);
-        searchRef.current?.focus();
-      },
-    });
 
     if (!rootPath) {
       return (

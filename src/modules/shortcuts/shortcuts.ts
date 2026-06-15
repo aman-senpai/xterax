@@ -73,13 +73,13 @@ export type Shortcut = {
 export const SHORTCUTS: Shortcut[] = [
   {
     id: "commandPalette.open",
-    label: "Open command palette",
+    label: "Go to file...",
     group: "General",
     defaultBindings: [{ [MOD_PROP]: true, key: "p" }],
   },
   {
     id: "commandPalette.content",
-    label: "Find in files",
+    label: "Show all commands",
     group: "General",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "p" }],
   },
@@ -223,7 +223,7 @@ export const SHORTCUTS: Shortcut[] = [
   },
   {
     id: "explorer.search",
-    label: "Search files",
+    label: "Find in files",
     group: "Search",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "f" }],
   },

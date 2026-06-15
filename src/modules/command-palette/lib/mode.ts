@@ -12,13 +12,16 @@ const PREFIXES: ReadonlyArray<{ sigil: string; mode: PaletteMode }> = [
   { sigil: "?", mode: "help" },
 ];
 
-export function parseQuery(raw: string): ParsedQuery {
+export function parseQuery(
+  raw: string,
+  defaultMode: PaletteMode = "commands",
+): ParsedQuery {
   for (const { sigil, mode } of PREFIXES) {
     if (raw.startsWith(sigil)) {
       return { mode, term: raw.slice(sigil.length).trim(), raw };
     }
   }
-  return { mode: "commands", term: raw.trim(), raw };
+  return { mode: defaultMode, term: raw.trim(), raw };
 }
 
 export const MODE_HINTS: ReadonlyArray<{ sigil: string; label: string }> = [

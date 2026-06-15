@@ -32,6 +32,7 @@ import {
   CONTENT_SEARCH_MIN_QUERY,
   useContentSearch,
 } from "./hooks/useContentSearch";
+import { FILE_SEARCH_MIN_QUERY, useFileSearch } from "./hooks/useFileSearch";
 import { fuzzyBest } from "./lib/fuzzy";
 import { MODE_HINTS, parseQuery } from "./lib/mode";
 import { mruRank, mruSnapshot, recordUse } from "./lib/mru";
@@ -40,7 +41,7 @@ import type { PaletteItem } from "./types";
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initialMode?: "commands" | "content";
+  initialMode?: "commands" | "files" | "content";
   commandItems: PaletteItem[];
   workspaceRoot: string | null;
   onOpenContentHit: (path: string, line: number) => void;
@@ -65,10 +66,15 @@ export function CommandPalette({
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
   const { themeId, customThemes, setThemeId, previewThemeId } = useTheme();
 
-  const parsed = parseQuery(query);
+  const parsed = parseQuery(query, initialMode);
   const inThemes = page === "themes";
   const themeFilter = inThemes ? query.trim() : "";
 
+  const files = useFileSearch(
+    workspaceRoot,
+    parsed.term,
+    open && !inThemes && parsed.mode === "files",
+  );
   const content = useContentSearch(
     workspaceRoot,
     parsed.term,
@@ -204,11 +210,13 @@ export function CommandPalette({
 
   const placeholder = inThemes
     ? "Search themes..."
-    : parsed.mode === "content"
-      ? "Find text in files..."
-      : parsed.mode === "history"
-        ? "Search command history..."
-        : "Type a command, > for history, # to find in files";
+    : parsed.mode === "files"
+      ? "Search files by name..."
+      : parsed.mode === "content"
+        ? "Find text in files..."
+        : parsed.mode === "history"
+          ? "Search command history..."
+          : "Type a command, > for history, # to find in files";
 
   return (
     <CommandDialog
@@ -292,6 +300,48 @@ export function CommandPalette({
                   );
                 })
               )
+            ) : parsed.mode === "files" ? (
+              <CommandGroup heading="Files">
+                {!workspaceRoot ? (
+                  <StatusItem label="No workspace root" />
+                ) : parsed.term.length < FILE_SEARCH_MIN_QUERY ? (
+                  <StatusItem label="Type at least 2 characters to search files" />
+                ) : (
+                  <AsyncBody
+                    loading={files.loading}
+                    error={files.error}
+                    empty={files.results.length === 0}
+                    emptyLabel="No files found"
+                    onRetry={files.retry}
+                  >
+                    {files.results.map((hit) => (
+                      <CommandItem
+                        key={hit.path}
+                        value={`file:${hit.path}`}
+                        onSelect={() => openContent(hit.path, 1)}
+                        className="text-[12.5px]"
+                      >
+                        <img
+                          src={fileIconUrl(
+                            hit.is_dir ? "" : basename(hit.rel),
+                          )}
+                          alt=""
+                          className="size-4 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {hit.name}
+                          {hit.is_dir ? (
+                            <span className="text-muted-foreground">/</span>
+                          ) : null}
+                        </span>
+                        <span className="ml-auto max-w-64 shrink-0 truncate text-[11px] font-normal text-muted-foreground">
+                          {hit.rel}
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </AsyncBody>
+                )}
+              </CommandGroup>
             ) : parsed.mode === "content" ? (
               <CommandGroup heading="Contents">
                 {!workspaceRoot ? (
