@@ -385,6 +385,12 @@ export type RunAgentOptions = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  /**
+   * Called once when the agent finishes a turn (after onFinishMeta).
+   * Used by the engineering profile system to trigger auto-refinement
+   * after the turn completes.
+   */
+  onTurnFinish?: () => void;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   mlxBaseURL?: string;
@@ -511,6 +517,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
         finishReason,
       });
+      opts.onTurnFinish?.();
     },
   });
 }

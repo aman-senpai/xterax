@@ -23,6 +23,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const toolContext: ToolContext = {
     getCwd: () => useChatStore.getState().live.getCwd(),
     getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+    getProjectRoot: () => useChatStore.getState().live.getProjectRoot(),
     getTerminalContext: () => useChatStore.getState().live.getTerminalContext(),
     isActiveTerminalPrivate: () =>
       useChatStore.getState().live.isActiveTerminalPrivate(),
@@ -86,6 +87,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     },
     onFinishMeta: (info) => {
       useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
+    },
+    onTurnFinish: () => {
+      const projectRoot = useChatStore.getState().live.getProjectRoot();
+      void import("@/modules/engineering-profile/autoRefine").then(
+        ({ maybeAutoRefine }) => {
+          void maybeAutoRefine({ projectRoot, scope: "user" });
+        },
+      );
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;

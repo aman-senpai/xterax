@@ -105,6 +105,10 @@ export function useAiLiveBridge(params: Params) {
         const { explorerRoot, launchCwd, home } = ref.current;
         return explorerRoot ?? launchCwd ?? home ?? null;
       },
+      getProjectRoot: () => {
+        const { launchCwd, home } = ref.current;
+        return launchCwd ?? home ?? null;
+      },
       getActiveFile: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);

@@ -4,10 +4,30 @@ import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
+import {
+  buildContextPackage,
+  loadProfileArtifacts,
+  renderContextPackageForPrompt,
+} from "@/modules/engineering-profile/runtime";
+import type { ContextPackage } from "@/modules/engineering-profile/runtime";
+import { ensureBootstrap } from "@/modules/engineering-profile/bootstrap";
+import { anchorProjectRoot } from "@/modules/engineering-profile/projectRoot";
+import { observeUserMessage } from "@/modules/engineering-profile/observer";
+import { maybeAutoRefine } from "@/modules/engineering-profile/autoRefine";
+import {
+  startLearningAgent as startAgent,
+  notifyChatTurnFinished as notifyTurnFinished,
+} from "@/modules/engineering-profile/learningAgent";
 
 const TERAX_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
 const projectMemoryCache = new Map<string, MemoryCacheEntry>();
+const profilePackageCache = new Map<
+  string,
+  { pkg: ContextPackage | null; mtime: number }
+>();
+const PROFILE_PACKAGE_TTL_MS = 30_000;
+const bootstrappedProjects = new Set<string>();
 
 async function readTeraxMd(
   workspaceRoot: string | null,
@@ -37,6 +57,90 @@ async function readTeraxMd(
   }
 }
 
+async function loadProfilePackage(
+  workspaceRoot: string | null,
+  taskText: string,
+): Promise<ContextPackage | null> {
+  const cacheKey = `${workspaceRoot ?? ""}::${taskText.slice(0, 240)}`;
+  const cached = profilePackageCache.get(cacheKey);
+  if (cached && Date.now() - cached.mtime < PROFILE_PACKAGE_TTL_MS) {
+    return cached.pkg;
+  }
+  try {
+    const pkg = await buildContextPackage({
+      taskText,
+      projectRoot: workspaceRoot,
+    });
+    profilePackageCache.set(cacheKey, { pkg, mtime: Date.now() });
+    return pkg;
+  } catch (err) {
+    console.warn("[engineering-profile] package build failed:", err);
+    profilePackageCache.set(cacheKey, { pkg: null, mtime: Date.now() });
+    return null;
+  }
+}
+
+function lastUserTaskText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
+    let acc = "";
+    for (const p of parts) {
+      if (p.type === "text" && p.text) acc += `${p.text}\n`;
+    }
+    if (acc.trim()) return acc.trim();
+  }
+  return "";
+}
+
+/**
+ * Runs the passive observer against every user message in this turn.
+ * Captures explicit preference patterns ("I prefer X", "always use Y")
+ * even when the agent doesn't proactively call the recording tool.
+ *
+ * Skips text wrapped in <env> or <file> tags (those are system-injected,
+ * not user-authored). Fire-and-forget; the chat run is not blocked.
+ *
+ * Triggers an LLM auto-refinement pass if any new signals were recorded.
+ */
+async function observeForProfile(
+  messages: UIMessage[],
+  projectRoot: string | null,
+): Promise<void> {
+  try {
+    let anyRecorded = false;
+    for (const m of messages) {
+      if (m.role !== "user") continue;
+      const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
+      for (const p of parts) {
+        if (p.type !== "text" || !p.text) continue;
+        const cleaned = stripInjectedBlocks(p.text);
+        if (cleaned.trim().length < 4) continue;
+        const result = await observeUserMessage({
+          text: cleaned,
+          projectRoot,
+        });
+        if (result.recorded.length > 0) anyRecorded = true;
+      }
+    }
+    if (anyRecorded) {
+      void maybeAutoRefine({ projectRoot, scope: "user" });
+    }
+  } catch (err) {
+    console.warn("[engineering-profile] observeForProfile failed:", err);
+  }
+}
+
+function stripInjectedBlocks(text: string): string {
+  return text
+    .replace(/<env>[\s\S]*?<\/env>/g, "")
+    .replace(/<file [^>]*>[\s\S]*?<\/file>/g, "")
+    .replace(/<selection[^>]*>[\s\S]*?<\/selection>/g, "")
+    .replace(/<terax-command[^>]*\/>/g, "")
+    .trim();
+}
+
 type LiveSnapshot = {
   cwd: string | null;
   terminalPrivate: boolean;
@@ -51,6 +155,14 @@ type Deps = {
   getCustomInstructions: () => string;
   getAgentPersona: () => { name: string; instructions: string } | null;
   getLive: () => LiveSnapshot;
+  /**
+   * Stable project root — the directory Terax was opened in. Distinct
+   * from `getLive().workspaceRoot` which follows the active terminal's
+   * cwd. Used as the anchor for the engineering profile directory so
+   * navigating between subdirectories via `cd` does not relocate the
+   * `.terx/engineering-profile/` directory.
+   */
+  getProjectRoot?: () => string | null;
   getLmstudioBaseURL?: () => string | undefined;
   getLmstudioModelId?: () => string | undefined;
   getMlxBaseURL?: () => string | undefined;
@@ -67,6 +179,7 @@ type Deps = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onTurnFinish?: () => void;
   getPlanMode?: () => boolean;
   getThinkingLevel?: () => string;
 };
@@ -80,11 +193,43 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
+    const liveRoot = live.workspaceRoot;
+    const projectRoot =
+      anchorProjectRoot(deps.getProjectRoot?.() ?? liveRoot) ?? liveRoot;
+    if (projectRoot && !bootstrappedProjects.has(projectRoot)) {
+      bootstrappedProjects.add(projectRoot);
+      void ensureBootstrap(projectRoot);
+      void startAgent(projectRoot);
+    }
+    void observeForProfile(options.messages, projectRoot);
+    void notifyTurnFinished();
     const projectMemory = await readTeraxMd(live.workspaceRoot);
+    const profileArtifacts = projectRoot
+      ? await loadProfileArtifacts(projectRoot, 4000)
+      : null;
+    const taskText = lastUserTaskText(options.messages);
+    const profilePkg = taskText
+      ? await loadProfilePackage(projectRoot, taskText)
+      : null;
+    const profileBlock = profilePkg
+      ? renderContextPackageForPrompt(profilePkg)
+      : "";
+    const artifactsBlock =
+      profileArtifacts && profileArtifacts.rootBody.trim().length > 0
+        ? `<profile-artifacts paths="${
+            profileArtifacts.includedSplits.join(", ") || "(root only)"
+          }" tokens="${profileArtifacts.totalTokens}">\n${profileArtifacts.rootBody}\n</profile-artifacts>`
+        : "";
     const envBlock = formatEnvBlock(live);
-    const messagesForRun = envBlock
+    let messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
       : options.messages;
+    if (artifactsBlock) {
+      messagesForRun = injectEngineeringProfile(messagesForRun, artifactsBlock);
+    }
+    if (profileBlock) {
+      messagesForRun = injectEngineeringProfile(messagesForRun, profileBlock);
+    }
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -95,6 +240,7 @@ export function createContextAwareTransport(deps: Deps) {
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
+      onTurnFinish: deps.onTurnFinish,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
       lmstudioModelId: deps.getLmstudioModelId?.(),
       mlxBaseURL: deps.getMlxBaseURL?.(),
@@ -125,6 +271,36 @@ export function createContextAwareTransport(deps: Deps) {
       return null;
     },
   };
+}
+
+function injectEngineeringProfile(
+  messages: UIMessage[],
+  block: string,
+): UIMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
+    let textIdx = -1;
+    for (let j = 0; j < parts.length; j++) {
+      if (parts[j].type === "text") {
+        textIdx = j;
+        break;
+      }
+    }
+    const nextParts =
+      textIdx === -1
+        ? [{ type: "text", text: block }, ...parts]
+        : parts.map((p, idx) =>
+            idx === textIdx
+              ? { ...p, text: `${p.text ?? ""}\n\n${block}` }
+              : p,
+          );
+    const out = messages.slice();
+    out[i] = { ...m, parts: nextParts } as UIMessage;
+    return out;
+  }
+  return messages;
 }
 
 function injectEnvIntoLastUser(

@@ -1,6 +1,7 @@
 import { useChatStore } from "@/modules/ai";
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { AiOpenButton } from "@/modules/ai/components/AiStatusBarControls";
+import { LearningAgentPill } from "@/modules/engineering-profile/StatusPill";
 import {
   Tooltip,
   TooltipContent,
@@ -57,6 +58,7 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <LearningAgentPill />
         <AgentStatusPill onClick={openRightPanel} />
         <AiOpenButton onClick={toggleRightPanel} active={rightPanelOpen} />
       </div>

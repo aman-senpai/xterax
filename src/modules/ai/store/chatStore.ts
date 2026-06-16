@@ -38,6 +38,13 @@ export type Live = {
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
   getWorkspaceRoot: () => string | null;
+  /**
+   * Stable project root — the directory Terax was opened in. Distinct
+   * from `getWorkspaceRoot` which follows the active terminal's cwd.
+   * Used by the engineering profile system to anchor the .terx/
+   * directory to the project root instead of the current subdirectory.
+   */
+  getProjectRoot: () => string | null;
   getActiveFile: () => string | null;
   openPreview: (url: string) => boolean;
   spawnManagedAgent: (
@@ -161,6 +168,7 @@ const NOOP_LIVE: Live = {
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
   getWorkspaceRoot: () => null,
+  getProjectRoot: () => null,
   getActiveFile: () => null,
   openPreview: () => false,
   spawnManagedAgent: () => null,

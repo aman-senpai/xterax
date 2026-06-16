@@ -5,6 +5,7 @@ import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import { observeUserMessage } from "@/modules/engineering-profile/observer";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 export type FileAttachment = {
@@ -307,6 +308,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       void chat.sendMessage({ role: "user", parts } as Parameters<
         typeof chat.sendMessage
       >[0]);
+      observeSubmittedMessage(effectiveText, store.live.getProjectRoot());
     })();
     setValue("");
     setFiles([]);
@@ -384,4 +386,33 @@ function readAsDataURL(file: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * Runs the passive observer against the user's submitted message. Records
+ * any explicit preference patterns ("I prefer X", "always use Y", "stop
+ * using Z") and triggers an auto-refinement pass if new signals landed.
+ *
+ * Fire-and-forget. The user sees no UI change; the .terax/profile.md
+ * file gets updated on the next refinement tick.
+ */
+async function observeSubmittedMessage(
+  text: string,
+  projectRoot: string | null,
+): Promise<void> {
+  if (!text || text.trim().length < 4) return;
+  try {
+    const result = await observeUserMessage({
+      text,
+      projectRoot,
+    });
+    if (result.recorded.length > 0) {
+      const { maybeAutoRefine } = await import(
+        "@/modules/engineering-profile/autoRefine"
+      );
+      void maybeAutoRefine({ projectRoot });
+    }
+  } catch (err) {
+    console.warn("[engineering-profile] observation failed:", err);
+  }
 }
