@@ -14,10 +14,28 @@
 let anchoredRoot: string | null = null;
 
 export function anchorProjectRoot(root: string | null): string | null {
-  if (anchoredRoot) return anchoredRoot;
-  if (root) {
+  if (!root) return anchoredRoot;
+
+  const normNew = root.replace(/\/$/, '');
+  if (!anchoredRoot) {
+    anchoredRoot = root;
+    return anchoredRoot;
+  }
+
+  const normAnchored = anchoredRoot.replace(/\/$/, '');
+
+  // If the new root is not a subdirectory of (or equal to) the current anchored root,
+  // it represents a different top-level project. Update the anchor so that
+  // preferences are correctly scoped to the project the user is currently
+  // working in (e.g. switching between terax-ai and resume checkouts in
+  // different terminals or sessions).
+  // This still protects against cd'ing into subdirectories of the current project
+  // (a subdir root will be under the anchored one, so we keep the higher anchor
+  // and write .terax/ at the stable project root, not the subdir).
+  if (!normNew.startsWith(normAnchored + '/') && normNew !== normAnchored) {
     anchoredRoot = root;
   }
+
   return anchoredRoot;
 }
 

@@ -12,6 +12,7 @@ import {
 import type { ContextPackage } from "@/modules/engineering-profile/runtime";
 import { anchorProjectRoot } from "@/modules/engineering-profile/projectRoot";
 import { observeUserMessage } from "@/modules/engineering-profile/observer";
+import { ensureBootstrap } from "@/modules/engineering-profile/bootstrap";
 import {
   startLearningAgent as startAgent,
   setAgentProjectRoot,
@@ -196,6 +197,15 @@ export function createContextAwareTransport(deps: Deps) {
         bootstrappedProjects.add(projectRoot);
         void startAgent(projectRoot);
       }
+      // Eagerly ensure the .terax/profile.md (and .json) skeleton exists
+      // for this anchored project. This guarantees that loadProfileArtifacts
+      // will always succeed in reading and injecting the raw on-disk
+      // Engineering Profile (as the <profile-artifacts> block) into every
+      // AI chat turn/context for the project — even before the first
+      // preference signal or refinement. The system prompt explicitly
+      // tells the model that this is auto-injected and that it must
+      // maintain it. ensureBootstrap is a no-op if the files already exist.
+      void ensureBootstrap(projectRoot).catch(() => {});
     }
     await observeForProfile(options.messages, projectRoot);
     const projectMemory = await readTeraxMd(live.workspaceRoot);

@@ -298,7 +298,7 @@ export function notifyUserFileEdit(filePath: string, summary: string): void {
   const isProfileFile =
     filePath.endsWith("/.terax/profile.md") ||
     filePath.endsWith("/.terax/profile.json") ||
-    filePath.includes("/.terax/");
+    filePath.includes("/.terax/");  // catch any file inside .terax/ (root profile, domain subs, history, etc.) for self-write guards
   if (isProfileFile) {
     if (projectRoot) {
       void import("./storage").then(async (m) => {

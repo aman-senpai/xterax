@@ -3,9 +3,9 @@
  *
  * Periodically sweeps recent chat history and tool-call patterns to
  * discover unspoken preferences the user has never stated. These are
- * the "micro-decisions you'd never document" that the taste-1 spec
- * describes — they live in the structure of how the user works, not
- * in their stated words.
+ * the "micro-decisions you'd never document" that the profile
+ * system aims to capture — they live in the structure of how the user
+ * works, not in their stated words.
  *
  * The miner reads the last N chat turns and recent tool-call records
  * (e.g. what file extensions the user typically edits, what kinds of

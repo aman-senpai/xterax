@@ -330,7 +330,12 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
   await writeFile(`${root}/profile.md`, renderProfileMarkdown(diskProfile));
   for (const dp of Object.values(diskProfile.domains)) {
     if (dp.split && dp.splitPath) {
-      const absDir = `${workspaceRoot.replace(/\/$/, "")}/${dp.splitPath.replace(/\/profile\.md$/, "")}`;
+      // Compute the directory part generically from the splitPath.
+      // This ensures we create the proper domain directory (e.g. .terax/design/) and place the profile file inside it,
+      // rather than accidentally creating a directory whose name is the filename.
+      const lastSlashIdx = dp.splitPath.lastIndexOf('/');
+      const dirPart = lastSlashIdx > 0 ? dp.splitPath.substring(0, lastSlashIdx) : '';
+      const absDir = `${workspaceRoot.replace(/\/$/, "")}/${dirPart}`;
       await ensureDir(absDir);
       await writeFile(
         `${workspaceRoot.replace(/\/$/, "")}/${dp.splitPath}`,
@@ -367,7 +372,10 @@ async function writeFile(path: string, content: string): Promise<void> {
 
 function renderProfileMarkdown(profile: Profile): string {
   const lines: string[] = [];
-  lines.push("# Engineering Profile");
+  lines.push("# Taste (Continuously Learned by Terax)");
+  lines.push("");
+  lines.push("This is the project's living Taste — the meta neuro-symbolic, continuously self-improving memory of choices, structures, patterns, tooling preferences, and micro-decisions.");
+  lines.push("It is updated autonomously from signals (explicit statements, accepts, rejections, edits, and the self-aware RL feedback loop). Never ask the user to repeat their taste.");
   lines.push("");
   const domainList = Object.values(profile.domains)
     .filter((d) => !d.split)
@@ -395,7 +403,9 @@ function renderProfileMarkdown(profile: Profile): string {
 
 function renderDomainProfileMarkdown(dp: Profile["domains"][string]): string {
   const lines: string[] = [];
-  lines.push(`# ${dp.category}`);
+  lines.push(`# Taste — ${dp.category} (Continuously Learned by Terax)`);
+  lines.push("");
+  lines.push("Composable sub-taste for this domain. Part of the project's overall living Taste profile.");
   lines.push("");
   for (const p of dp.preferences) {
     lines.push(renderPreferenceLine(p));

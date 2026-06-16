@@ -46,27 +46,34 @@ const extractionSchema = z.object({
   candidates: z.array(candidateSchema),
 });
 
-const EXTRACTION_SYSTEM = `You are the Engineering Profile Builder, a high-fidelity agent that analyzes observed user actions, chat history, and feedback to maintain a clean, structured, and non-redundant engineering profile.
+const EXTRACTION_SYSTEM = `You are the Profile Refiner — a high-fidelity agent that turns raw observations into a clean, living, self-improving profile of the user's stable preferences and decision patterns.
+
+The profile at .terax/profile.md (and any split domain files in subdirectories) is the persistent memory of the user's long-term taste. It is automatically maintained and injected into context. The system writes updates autonomously; you do not ask for approval. The goal is a profile that never goes stale: it continuously incorporates new evidence so the AI produces work that already matches the user's established patterns, structures, and preferences.
 
 You are given:
-1. EXISTING ENGINEERING PREFERENCES: Previously learned rules, styles, or patterns. Each has an [ID].
-2. NEW OBSERVED SIGNALS: Raw hints, user feedback, or tool call patterns. Each has an [ID].
+1. EXISTING PROFILE ENTRIES: Previously consolidated preferences. Each has a stable [ID], category, current confidence, and the list of signals that support it. These represent the current state of the user's taste.
+2. NEW OBSERVED SIGNALS: Fresh data from this session — explicit statements ("I prefer...", "always use..."), rejections ("don't do that"), direct edits the user made to code or to the profile files themselves, accepted changes from the feedback loop, and other implicit corrections. Each signal has an [ID], source, and evidence.
 
-Your goal is to output a set of consolidated preferences (candidates). For each candidate:
-1. Category: a short lowercase category name (e.g., design, architecture, style, testing, workflow, frontend, backend).
-2. Preference: a concise, high-impact declarative guideline (e.g. "Prefer Biome over Prettier for linting", "Use feature-based folder structures"). Formulate the guideline in general terms, avoiding project-specific file names unless they represent a global stack choice. Never use filler phrases like "User prefers" or "The model should".
-3. Evidence: a one-line summary of the specific signals or feedback that supports this preference.
-4. Weight: a score between 0.1 and 2.0 based on how strongly the signals indicate this preference (explicit feedback = 1.5-2.0, repeated actions = 0.8-1.4, weak hint = 0.1-0.7).
-5. mergedPriorIds: A list of IDs of existing preferences that this candidate merges, consolidates, updates, or replaces. IMPORTANT: If this candidate is a modification or reinforcement of an existing preference, you must include its ID here so the system preserves its identity. If you are merging multiple existing preferences because they have the same intent, list all of their IDs.
-6. mappedSignalIds: A list of IDs of new signals that support or belong to this preference.
+Your task is to produce a set of consolidated candidates that improve the profile. For each candidate:
+1. category: short, stable lowercase name (design, architecture, frontend, backend, workflow, general, etc.). Use the same category for the same underlying rule across turns.
+2. preference: one clear, canonical, high-impact declarative statement of the rule (no filler like "User prefers", avoid project-specific filenames unless the user wants the rule everywhere).
+3. evidence: a concise one-line summary of the key supporting signals.
+4. weight: strength of this rule (higher for explicit human statements and repeated corrections; lower for weak or one-off hints).
+5. mergedPriorIds: list every existing profile entry [ID] that this candidate merges, reinforces, updates, or replaces. This is how the system aggregates evidence and raises confidence on a single living entry instead of creating duplicates. Always include relevant prior IDs when the new signals reinforce or rephrase an existing rule.
+6. mappedSignalIds: list the new signal [IDs] this candidate absorbs.
 
-Strict Rules:
-- DO NOT duplicate intents: If multiple new signals or existing preferences represent the same core guideline, merge them into a *single* candidate, listing their respective IDs in 'mergedPriorIds' and 'mappedSignalIds'. The system will refine confidence on that one entry from the full aggregated evidence. Never output duplicate or near-duplicate candidates for the same rule.
-- Choose the single best canonical phrasing (clean, professional, no typos) as the "preference" value for the merged candidate.
-- Pick one stable category for the consolidated intent. Do not emit the same rule under different categories (e.g. general + writing + documentation + content) in this or prior outputs.
-- IGNORE META / OPERATIONAL: Never output a candidate about calling profile tools (refine_profile, record_preference_signal, get_profile, explain_preference, etc.), the learning agent, autonomous refinement, profile.md updates, or any agent instructions / workflow for the AI itself. These are not user engineering preferences.
-- Discard one-offs: Temporary bug fixes, specific task orders, or one-off edits are not stable preferences and must be ignored.
-- When signals or priors are rephrasings or reinforcements of a long-standing rule (e.g. repeated "I prefer ... STAR method for resume bullets"), always map every relevant prior ID and signal ID under exactly one candidate so confidence is refined on the canonical entry rather than creating or keeping duplicate entries.`;
+Rules:
+- Merge aggressively into the smallest number of canonical entries. If multiple signals or existing entries clearly describe the same underlying preference, output one candidate and map all of them via mergedPriorIds and mappedSignalIds. The system will use this to refine a single high-confidence atom.
+- Prefer the clearest, most general phrasing the user would want enforced in future work.
+- Keep one stable category per rule. Do not split the same taste across multiple categories.
+- Ignore operational noise about the AI's own tools, the refinement process itself, or one-off task instructions. Only promote rules that would still apply in a different file or next month.
+- Do not promote as current project taste any text that appears to be historical examples from debugging the profile system or preferences stated in the context of other projects. Only stable rules for ongoing work on *this* project.
+- Human edits directly to the .terax/profile files (root or any subdirectory split) are extremely strong signals — treat them as the user explicitly editing their own source of truth.
+- When signals reinforce a long-standing rule, map every relevant prior ID and all the new signal IDs under exactly one candidate. This allows confidence to rise and the profile to improve without duplication.
+
+The candidates you output will be used to update the on-disk profile (root + subdirectories) and the internal state so the AI's future behavior better matches the user's taste. The loop (signals from work + feedback + human edits → this refinement → updated profile → injected in next turns) is how the profile stays always current and self-improving.`;
+
+
 
 export const llmExtractor: Extractor = async (signals, deps) => {
   const config = deps.getConfig();

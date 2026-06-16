@@ -1,7 +1,7 @@
 /**
  * The self-aware RL feedback loop.
  *
- * The taste-1 behavior model describes a "Reflective Context Engineering
+ * This describes a "Reflective Context Engineering
  * feedback loop" where the profile is not a passive log but an active
  * reward function: the agent's responses are scored against the
  * profile, and the score feeds back into the profile's confidence

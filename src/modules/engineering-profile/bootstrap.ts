@@ -90,15 +90,19 @@ function makeEmptyProfile(workspaceRoot: string): Profile {
 }
 
 function renderInitialProfileMd(workspaceRoot: string): string {
-  return `# Engineering Profile (Continuously Learned by Terax)
+  return `# Taste (Continuously Learned by Terax)
 
-This is the root memory artifact for Terax's continuous-learning agent. It is created automatically the first time a preference signal is recorded for this workspace.
+This is the project's living Taste profile — the meta neuro-symbolic, continuously self-improving memory of the user's invisible architecture: choices, structures, patterns, tooling preferences, and micro-decisions.
 
-The autonomous continuous-learning agent updates this file on its own schedule. Edits happen without approval — they are based on observed preferences, tool calls, and user feedback across sessions. Each preference carries a confidence score in [0, 1] that increases with repeated evidence and decays with disuse.
+It is created automatically the first time signals are observed for this workspace (explicit statements, accepts, rejections, edits, and the self-aware RL feedback loop).
 
-The agent always loads this file at the start of every new chat. As the profile grows, the autonomous agent may split large domains into their own subdirectory files (e.g. \`./design/profile.md\`) when thresholds are met. The root file will then reference those.
+The autonomous continuous-learning agent (refinement via the meta-neuro-symbolic process) updates this file on its own schedule with no approval required. Every accept, reject, and edit is a signal. Confidence grows through merging and reinforcement; the profile never goes stale.
 
-To reset the profile for this workspace, delete this directory.
+The raw content (root + any split sub-profiles in subdirectories such as \`.terax/design/profile.md\`) is automatically injected into the AI context at the start of every turn. The agent is instructed to internalize it and keep it updated.
+
+This is the source of truth for how this specific project should feel. Subdirectories can hold composable domain profiles. History of previous states lives under \`.terax/history/\`.
+
+To fully reset the profile for this workspace, delete the \`.terax\` directory.
 
 Project: \`${workspaceRoot}\`
 `;
