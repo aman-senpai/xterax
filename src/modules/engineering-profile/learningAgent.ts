@@ -28,16 +28,30 @@
  *     yielding the most reliable preferences, so future extraction
  *     weights them higher)
  *
- * Triggers (any of these wake the agent):
- *   - `notifySignalRecorded()` — called whenever a new signal lands
- *   - `notifyChatTurnFinished()` — called when the chat agent finishes
- *   - `notifyToolRejection()` — called when the user rejects a tool
- *     approval (downward signal)
- *   - idle tick (every IDLE_INTERVAL_MS) — sweeps pending signals even
- *     if no event has fired
+ * Triggers for *signals* (cheap observation/recording):
+ *   - `notifySignalRecorded()` — from record_preference_signal tool or
+ *     passive observer on user messages (and some other paths).
+ *   - Feedback on turns (accept/reject signals from runFeedbackForTurn).
+ *
+ * Refinement (the LLM extractor + merge/consolidation step, i.e. the
+ * costly part) is **only** driven by new user-sent chat messages:
+ *   - `notifyUserMessageSent()` — called from the composer when the user
+ *     submits a message. This is the single controlled entry point.
+ *     Any accumulated signals (from observer, agent tool calls during
+ *     the turn, feedback, rejections, etc.) are processed then.
+ *
+ * Intelligence / cost control:
+ *   - maybeRefine has built-in guards (throttle, in-flight lock,
+ *     signalsSinceLastRefine > 0, scopesNeedingRefine checking real
+ *     stored signals, bootstrap check).
+ *   - No more automatic refinement on every agent turn-finished,
+ *     idle tick, or most file edits. This prevents over-calling the
+ *     generateObject extractor (and the resulting profile writes).
+ *   - Feedback/RL still runs cheaply on turns.
+ *   - Initial sweep on agent start (tied to first user message in session).
  *
  * Throttling: refinement runs at most every `MIN_REFINEMENT_INTERVAL_MS`
- * in response to events. The idle tick is throttled separately.
+ * when triggered.
  */
 
 import { observeUserMessage } from "./observer";
@@ -202,7 +216,13 @@ async function handleTurnFinished(
   if (turn) {
     await runFeedbackForTurn(turn);
   }
-  await maybeRefine("turn-finished");
+  // IMPORTANT: No automatic refinement on every agent turn.
+  // Per user preference, refinements (the LLM extraction + merge step) are
+  // driven only by new user-sent chat messages (see notifyUserMessageSent).
+  // This prevents over-calling the costly extractor LLM on every turn/finish.
+  // Feedback/RL (accept/reject signals) still runs on turns as it's cheap.
+  // Accumulated signals from feedback or other sources will be processed
+  // on the *next* user message.
 }
 
 async function runFeedbackForTurn(
@@ -254,9 +274,24 @@ export function notifyToolRejection(toolName: string, reason: string): void {
   void observeUserMessage({
     text: `Don't use ${toolName} that way: ${reason}`,
     projectRoot,
-  }).then(() => {
-    void maybeRefine("rejection");
   });
+  // Note: we no longer auto-trigger refinement here. The rejection signal
+  // is recorded by observeUserMessage (if it matches patterns). The actual
+  // refinement pass (LLM merge) will happen on the next user chat message
+  // (see notifyUserMessageSent) to control API cost.
+}
+
+export function notifyUserMessageSent(projectRootOverride?: string | null): void {
+  if (projectRootOverride) {
+    setAgentProjectRoot(projectRootOverride);
+  }
+  // This is the primary (and preferred) trigger for refinement.
+  // Any time the user sends a chat message, we process accumulated signals
+  // and intelligently run refinement if needed (subject to throttle,
+  // pending signals count, in-flight lock, etc.).
+  // This replaces per-turn "turn-finished" refinement to avoid overuse
+  // and excessive LLM extractor costs.
+  void maybeRefine("user-message");
 }
 
 export function notifyUserFileEdit(filePath: string, summary: string): void {
@@ -267,11 +302,7 @@ export function notifyUserFileEdit(filePath: string, summary: string): void {
   if (isProfileFile) {
     if (projectRoot) {
       void import("./storage").then(async (m) => {
-        // Guard against our own writes: the Rust fs watcher (used by editor sync
-        // and file tree) + listenFsChanged will report our native.writeFile calls
-        // to profile files almost immediately. Without this, syncProfileFromDisk
-        // would run on our own output, rebuild, and write again → continuous loop
-        // modifying profile.json / .md.
+        // Guard against our own writes...
         const lastWrite = (m as any).getLastProfileSelfWrite?.() ?? 0;
         if (Date.now() - lastWrite < 3000) {
           return;
@@ -282,14 +313,21 @@ export function notifyUserFileEdit(filePath: string, summary: string): void {
     return;
   }
   const text = `User edited ${filePath}: ${summary}`;
-  void observeUserMessage({ text, projectRoot }).then(() => {
-    void maybeRefine("user-edit");
-  });
+  void observeUserMessage({ text, projectRoot });
+  // We no longer immediately call maybeRefine here. observe may record a
+  // preference signal if the edit text matches patterns. The refinement
+  // (LLM pass) will be triggered on the next user-sent chat message.
 }
 
 async function idleTick(): Promise<void> {
+  // Idle no longer triggers refinement passes.
+  // Refinement (the LLM extractor + merge) is intentionally gated to
+  // user-sent chat messages only (see notifyUserMessageSent + intelligence
+  // guards inside maybeRefine) to avoid excessive API cost from the
+  // continuous-learning extractor.
   if (state.signalsSinceLastRefine < IDLE_MIN_PENDING_SIGNALS) return;
-  await maybeRefine("idle-tick");
+  // Could do lightweight maintenance here in the future if needed,
+  // but no auto-refine.
 }
 
 async function initialSweep(): Promise<void> {
@@ -312,7 +350,7 @@ async function initialSweep(): Promise<void> {
 async function maybeRefine(
   trigger:
     | "signal"
-    | "turn-finished"
+    | "user-message"
     | "rejection"
     | "user-edit"
     | "idle-tick"

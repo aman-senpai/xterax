@@ -309,6 +309,18 @@ export function AiComposerProvider({ children }: ProviderProps) {
         typeof chat.sendMessage
       >[0]);
       observeSubmittedMessage(effectiveText, store.live.getProjectRoot());
+
+      // Trigger profile refinement on user-sent messages only.
+      // This is the controlled, intelligent entry point (subject to
+      // MIN_REFINEMENT_INTERVAL, pending signals count, in-flight lock,
+      // etc.). Avoids over-calling the LLM extractor on every agent turn
+      // or idle, which was causing excessive API cost and constant
+      // profile.json writes/flicker.
+      void import("@/modules/engineering-profile/learningAgent").then(
+        ({ notifyUserMessageSent }) => {
+          notifyUserMessageSent(store.live.getProjectRoot());
+        },
+      );
     })();
     setValue("");
     setFiles([]);

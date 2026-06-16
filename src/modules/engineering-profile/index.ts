@@ -116,6 +116,7 @@ export {
   notifyChatTurnFinished,
   notifyToolRejection,
   notifyUserFileEdit,
+  notifyUserMessageSent,
   getAgentState,
   subscribeAgent,
   forceRefine,
