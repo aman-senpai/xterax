@@ -462,203 +462,224 @@ export function CsvPreviewPane({ path, visible, onSetView }: Props) {
         </p>
       )}
 
-      {/* Table — scroll container */}
+      {/* Table — split header (fixed) + body (scrollable) */}
       {status.kind === "ready" && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: click-to-deselect on container
-        <div
-          ref={scrollContainerRef}
-          className="scrollbar-visible flex-1 overflow-auto pt-10 outline-none"
-          onScroll={onScroll}
-          // Deselect on backdrop click
-          onClick={(e) => {
-            if (e.target === scrollContainerRef.current) setSelection(null);
-          }}
-          // Allow keyboard events to bubble from child inputs
-          tabIndex={-1}
-        >
-          <table
-            className="min-w-max border-separate border-spacing-0 text-[12px] leading-none select-none"
-            style={{ tableLayout: "fixed" }}
-          >
-            <colgroup>
-              {/* row-number gutter */}
-              <col style={{ width: "3.5rem", minWidth: "3.5rem" }} />
-              {Array.from({ length: colCount }).map((_, ci) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
-                <col key={ci} style={{ minWidth: "8rem" }} />
-              ))}
-            </colgroup>
-
-            {/* Sticky header */}
-            {header && (
-              <thead className="sticky top-0 z-10" style={{ height: HEADER_HEIGHT }}>
-                <tr>
-                  <th
-                    scope="col"
-                    className="border-b border-r border-border/50 bg-muted/80 px-2 text-right text-[10px] font-medium tabular-nums text-muted-foreground/50 backdrop-blur select-none"
-                    style={{ height: HEADER_HEIGHT }}
-                  />
-                  {Array.from({ length: colCount }).map((_, ci) => {
-                    const cell = header[ci] ?? "";
-                    const isEditing = editing?.row === -1 && editing?.col === ci;
-                    return (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
-                      <th
-                        key={ci}
-                        scope="col"
-                        className="border-b border-r border-border/50 bg-muted/80 px-0 text-left font-semibold backdrop-blur"
-                        style={{ height: HEADER_HEIGHT, color: colColor(ci) }}
-                        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: spreadsheet header
-                        onDoubleClick={(e) => handleCellDoubleClick(e, true, 0, ci)}
-                      >
-                        {isEditing ? (
-                          <input
-                            ref={editInputRef}
-                            className="h-full w-full bg-accent/30 px-3 text-[12px] text-foreground outline-none ring-2 ring-inset ring-primary/50"
-                            defaultValue={editing.value}
-                            style={{ height: HEADER_HEIGHT }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === "Tab") {
-                                e.preventDefault();
-                                commitEdit(-1, ci, e.currentTarget.value);
-                              } else if (e.key === "Escape") {
-                                cancelEdit();
-                              }
-                            }}
-                            onBlur={(e) => commitEdit(-1, ci, e.currentTarget.value)}
-                          />
-                        ) : (
-                          <span className="block truncate px-3">
-                            {cell || (
-                              <span className="text-muted-foreground/40">
-                                {String.fromCharCode(65 + ci)}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-            )}
-
-            <tbody>
-              {/* Top padding spacer for virtual scrolling */}
-              {paddingTop > 0 && (
-                <tr aria-hidden style={{ height: paddingTop }}>
-                  <td colSpan={colCount + 1} />
-                </tr>
-              )}
-
-              {visibleRows.map((row, localIdx) => {
-                const ri = startIdx + localIdx;
-                const isRowSelected =
-                  selection !== null &&
-                  (() => {
-                    const { minRow, maxRow } = normalizeRange(selection);
-                    return ri >= minRow && ri <= maxRow;
-                  })();
-
-                return (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: virtual row index
-                  <tr
-                    key={ri}
-                    className={cn(
-                      "group/row transition-colors",
-                      isRowSelected ? "bg-primary/8" : "hover:bg-accent/40",
-                    )}
-                    style={{ height: ROW_HEIGHT }}
-                  >
-                    {/* Row number */}
-                    <td
-                      className="border-b border-r border-border/30 bg-muted/30 px-2 text-right text-[10px] tabular-nums text-muted-foreground/40 select-none group-hover/row:bg-muted/50"
-                      style={{ height: ROW_HEIGHT }}
-                    >
-                      {ri + 1}
-                    </td>
-
+        <>
+          {/* Fixed header */}
+          {header && (
+            <div className="shrink-0 pt-10">
+              <table
+                className="min-w-max border-separate border-spacing-0 text-[12px] leading-none select-none"
+                style={{ tableLayout: "fixed" }}
+              >
+                <colgroup>
+                  {/* row-number gutter */}
+                  <col style={{ width: "3.5rem", minWidth: "3.5rem" }} />
+                  {Array.from({ length: colCount }).map((_, ci) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
+                    <col key={ci} style={{ minWidth: "8rem" }} />
+                  ))}
+                </colgroup>
+                <thead style={{ height: HEADER_HEIGHT }}>
+                  <tr>
+                    <th
+                      scope="col"
+                      className="border-b border-r border-border/50 bg-muted/80 px-2 text-right text-[10px] font-medium tabular-nums text-muted-foreground/50 backdrop-blur select-none"
+                      style={{ height: HEADER_HEIGHT }}
+                    />
                     {Array.from({ length: colCount }).map((_, ci) => {
-                      const isSelected = cellInRange(ri, ci, selection);
-                      const isEditing =
-                        editing?.row === ri && editing?.col === ci;
-
+                      const cell = header[ci] ?? "";
+                      const isEditing = editing?.row === -1 && editing?.col === ci;
                       return (
                         // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
-                        <td
+                        <th
                           key={ci}
-                          className={cn(
-                            "relative border-b border-r border-border/30 px-0",
-                            isSelected &&
-                              "ring-1 ring-inset ring-primary/40 bg-primary/10",
-                          )}
-                          style={{ height: ROW_HEIGHT, color: colColor(ci) }}
-                          onClick={(e) => handleCellClick(e, ri, ci)}
-                          onDoubleClick={(e) =>
-                            handleCellDoubleClick(e, false, ri, ci)
-                          }
+                          scope="col"
+                          className="border-b border-r border-border/50 bg-muted/80 px-0 text-left font-semibold backdrop-blur"
+                          style={{ height: HEADER_HEIGHT, color: colColor(ci) }}
+                          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: spreadsheet header
+                          onDoubleClick={(e) => handleCellDoubleClick(e, true, 0, ci)}
                         >
                           {isEditing ? (
                             <input
                               ref={editInputRef}
-                              className="absolute inset-0 w-full bg-accent/30 px-3 text-[12px] text-foreground outline-none ring-2 ring-inset ring-primary/60"
-                              style={{ height: ROW_HEIGHT }}
+                              className="h-full w-full bg-accent/30 px-3 text-[12px] text-foreground outline-none ring-2 ring-inset ring-primary/50"
                               defaultValue={editing.value}
+                              style={{ height: HEADER_HEIGHT }}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter") {
+                                if (e.key === "Enter" || e.key === "Tab") {
                                   e.preventDefault();
-                                  commitEdit(ri, ci, e.currentTarget.value);
-                                } else if (e.key === "Tab") {
-                                  e.preventDefault();
-                                  commitEdit(ri, ci, e.currentTarget.value);
-                                  // Move to next cell
-                                  const nextCol = ci + 1 < colCount ? ci + 1 : 0;
-                                  const nextRow = ci + 1 < colCount ? ri : Math.min(ri + 1, dataRows.length - 1);
-                                  setSelection({ anchor: { row: nextRow, col: nextCol }, active: { row: nextRow, col: nextCol } });
+                                  commitEdit(-1, ci, e.currentTarget.value);
                                 } else if (e.key === "Escape") {
                                   cancelEdit();
                                 }
                               }}
-                              onBlur={(e) =>
-                                commitEdit(ri, ci, e.currentTarget.value)
-                              }
+                              onBlur={(e) => commitEdit(-1, ci, e.currentTarget.value)}
                             />
                           ) : (
-                            <span
-                              className="block truncate px-3"
-                              style={{ lineHeight: `${ROW_HEIGHT}px` }}
-                              title={row[ci] ?? ""}
-                            >
-                              {row[ci] ?? ""}
+                            <span className="block truncate px-3">
+                              {cell || (
+                                <span className="text-muted-foreground/40">
+                                  {String.fromCharCode(65 + ci)}
+                                </span>
+                              )}
                             </span>
                           )}
-                        </td>
+                        </th>
                       );
                     })}
                   </tr>
-                );
-              })}
+                </thead>
+              </table>
+            </div>
+          )}
 
-              {/* Bottom padding spacer */}
-              {paddingBottom > 0 && (
-                <tr aria-hidden style={{ height: paddingBottom }}>
-                  <td colSpan={colCount + 1} />
-                </tr>
-              )}
+          {/* Scrollable body */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: click-to-deselect on container */}
+          <div
+            ref={scrollContainerRef}
+            className={cn(
+              "scrollbar-visible flex-1 overflow-auto outline-none",
+              !header && "pt-10",
+            )}
+            onScroll={onScroll}
+            // Deselect on backdrop click
+            onClick={(e) => {
+              if (e.target === scrollContainerRef.current) setSelection(null);
+            }}
+            // Allow keyboard events to bubble from child inputs
+            tabIndex={-1}
+          >
+            <table
+              className="min-w-max border-separate border-spacing-0 text-[12px] leading-none select-none"
+              style={{ tableLayout: "fixed" }}
+            >
+              <colgroup>
+                {/* row-number gutter */}
+                <col style={{ width: "3.5rem", minWidth: "3.5rem" }} />
+                {Array.from({ length: colCount }).map((_, ci) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
+                  <col key={ci} style={{ minWidth: "8rem" }} />
+                ))}
+              </colgroup>
 
-              {totalDataRows === 0 && (
-                <tr>
-                  <td
-                    colSpan={colCount + 1}
-                    className="px-6 py-4 text-[12px] text-muted-foreground"
-                  >
-                    No data rows.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              <tbody>
+                {/* Top padding spacer for virtual scrolling */}
+                {paddingTop > 0 && (
+                  <tr aria-hidden style={{ height: paddingTop }}>
+                    <td colSpan={colCount + 1} />
+                  </tr>
+                )}
+
+                {visibleRows.map((row, localIdx) => {
+                  const ri = startIdx + localIdx;
+                  const isRowSelected =
+                    selection !== null &&
+                    (() => {
+                      const { minRow, maxRow } = normalizeRange(selection);
+                      return ri >= minRow && ri <= maxRow;
+                    })();
+
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: virtual row index
+                    <tr
+                      key={ri}
+                      className={cn(
+                        "group/row transition-colors",
+                        isRowSelected ? "bg-primary/8" : "hover:bg-accent/40",
+                      )}
+                      style={{ height: ROW_HEIGHT }}
+                    >
+                      {/* Row number */}
+                      <td
+                        className="border-b border-r border-border/30 bg-muted/30 px-2 text-right text-[10px] tabular-nums text-muted-foreground/40 select-none group-hover/row:bg-muted/50"
+                        style={{ height: ROW_HEIGHT }}
+                      >
+                        {ri + 1}
+                      </td>
+
+                      {Array.from({ length: colCount }).map((_, ci) => {
+                        const isSelected = cellInRange(ri, ci, selection);
+                        const isEditing =
+                          editing?.row === ri && editing?.col === ci;
+
+                        return (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: stable col index
+                          <td
+                            key={ci}
+                            className={cn(
+                              "relative border-b border-r border-border/30 px-0",
+                              isSelected &&
+                                "ring-1 ring-inset ring-primary/40 bg-primary/10",
+                            )}
+                            style={{ height: ROW_HEIGHT, color: colColor(ci) }}
+                            onClick={(e) => handleCellClick(e, ri, ci)}
+                            onDoubleClick={(e) =>
+                              handleCellDoubleClick(e, false, ri, ci)
+                            }
+                          >
+                            {isEditing ? (
+                              <input
+                                ref={editInputRef}
+                                className="absolute inset-0 w-full bg-accent/30 px-3 text-[12px] text-foreground outline-none ring-2 ring-inset ring-primary/60"
+                                style={{ height: ROW_HEIGHT }}
+                                defaultValue={editing.value}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitEdit(ri, ci, e.currentTarget.value);
+                                  } else if (e.key === "Tab") {
+                                    e.preventDefault();
+                                    commitEdit(ri, ci, e.currentTarget.value);
+                                    // Move to next cell
+                                    const nextCol = ci + 1 < colCount ? ci + 1 : 0;
+                                    const nextRow = ci + 1 < colCount ? ri : Math.min(ri + 1, dataRows.length - 1);
+                                    setSelection({ anchor: { row: nextRow, col: nextCol }, active: { row: nextRow, col: nextCol } });
+                                  } else if (e.key === "Escape") {
+                                    cancelEdit();
+                                  }
+                                }}
+                                onBlur={(e) =>
+                                  commitEdit(ri, ci, e.currentTarget.value)
+                                }
+                              />
+                            ) : (
+                              <span
+                                className="block truncate px-3"
+                                style={{ lineHeight: `${ROW_HEIGHT}px` }}
+                                title={row[ci] ?? ""}
+                              >
+                                {row[ci] ?? ""}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+
+                {/* Bottom padding spacer */}
+                {paddingBottom > 0 && (
+                  <tr aria-hidden style={{ height: paddingBottom }}>
+                    <td colSpan={colCount + 1} />
+                  </tr>
+                )}
+
+                {totalDataRows === 0 && (
+                  <tr>
+                    <td
+                      colSpan={colCount + 1}
+                      className="px-6 py-4 text-[12px] text-muted-foreground"
+                    >
+                      No data rows.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
