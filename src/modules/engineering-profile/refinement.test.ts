@@ -189,9 +189,9 @@ describe("buildFallbackCandidates", () => {
       timestamp: over.timestamp ?? 0,
       source: over.source ?? "explicit-feedback",
       scope: over.scope ?? "project",
-      projectRoot: over.projectRoot ?? "/test",
+      projectRoot: over.projectRoot ?? "/tmp/terax-test-isolated",
       category: over.category ?? "general",
-      preference: over.preference ?? "Use STAR format",
+      preference: over.preference ?? "Prefer feature-based folders",
       evidence: over.evidence ?? "",
       weight: over.weight ?? 1,
     };
@@ -200,8 +200,8 @@ describe("buildFallbackCandidates", () => {
   it("groups signals with the same preference into one candidate", () => {
     const candidates = buildFallbackCandidates(
       [
-        sig({ id: "s1", preference: "Use STAR format for resume bullets" }),
-        sig({ id: "s2", preference: "Use STAR format for resume bullets" }),
+        sig({ id: "s1", preference: "Prefer feature-based folders" }),
+        sig({ id: "s2", preference: "Prefer feature-based folders" }),
       ],
       [],
     );
@@ -223,9 +223,9 @@ describe("refineProfile", () => {
         timestamp: Date.now(),
         source: "explicit-feedback",
         scope: "project",
-        projectRoot: "/test",
+        projectRoot: "/tmp/terax-test-isolated",
         category: "general",
-        preference: "Use STAR format for resume bullets",
+        preference: "Prefer feature-based folders",
         evidence: "user said so",
         weight: 1,
       },

@@ -709,7 +709,7 @@ Stable, generalizable rules and patterns that should influence behavior across f
 
 Good examples:
 - "UI must follow the product's own design system — don't introduce ad-hoc styles or deviate from established patterns."
-- "All resume bullet points must follow the STAR method (Situation, Task, Action, Result)."
+- "Prefer co-located tests (Vitest) next to the modules they cover."
 - "Prefer feature-based folder structures over type-based."
 - "Keep code extremely concise. No comments unless the reason is non-obvious from the code and history."
 
