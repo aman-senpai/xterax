@@ -43,7 +43,7 @@ let fsMirrorDisabled = false;
 let fsMirrorWarned = false;
 let fsMirrorEnabled = false;
 
-// To prevent feedback loops where our own writes to .terax/profile.* (and splits/history)
+// To prevent feedback loops where our own writes to .terax/profile.md (and split profiles)
 // trigger Rust fs watchers → listenFsChanged → handlePaths → notifyUserFileEdit → syncProfileFromDisk
 // which then writes again. We note the time of our writes; notifyUserFileEdit for profile paths
 // within a short window after a self-write will skip the sync.
@@ -261,7 +261,7 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
 
   // Note self-write *before* any native writes so that the fs:changed events
   // we inevitably emit won't cause a re-entrant syncProfileFromDisk (which would
-  // otherwise rewrite json/md and keep the loop going).
+  // otherwise rewrite profile.md and keep the loop going).
   noteProfileSelfWrite();
 
   // Write the pure profile for this scope/root.
@@ -271,35 +271,6 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
   // Merging (if desired for effective context) happens in getMergedProfile /
   // buildContextPackage at runtime.
   const diskProfile = profile;
-
-  // Avoid rewriting the on-disk profile artifacts (json/md + splits + history) on
-  // every reinforce/turn when the user-visible content hasn't changed. This is
-  // the main cause of continuous modification to profile.json and the resulting
-  // editor flicker/reloads when the file is open (via fs:file-written + useEditorFileSync
-  // + fs:changed listeners). We still always update the internal store and append
-  // snapshots for history/audit.
-  const jsonPath = `${workspaceRoot.replace(/\/$/, "")}/.terax/profile.json`;
-  try {
-    const onDiskRes = await native.readFile(jsonPath);
-    if (onDiskRes.kind === "text") {
-      const old = JSON.parse(onDiskRes.content) as Profile;
-      const renderable = (p: Preference) => ({
-        category: p.category,
-        preference: p.preference,
-        confidence: Number(p.confidence.toFixed(2)), // as rendered
-        pinned: !!p.pinned,
-      });
-      const oldR = (old.preferences || []).map(renderable);
-      const newR = (diskProfile.preferences || []).map(renderable);
-      if (JSON.stringify(oldR) === JSON.stringify(newR)) {
-        // No visible change to the profile the user/agent sees. Skip mirror write.
-        // (splits and history writes are also inside the function below, so return early)
-        return;
-      }
-    }
-  } catch {
-    // No on-disk or parse error -> proceed to (re)write
-  }
 
   if (!fsMirrorEnabled) {
     try {
@@ -318,13 +289,28 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
   }
   const root = await ensureFsMirrorRoot(workspaceRoot);
   await ensureDir(root);
-  await writeFile(`${root}/profile.json`, JSON.stringify(diskProfile, null, 2));
-  await writeFile(`${root}/profile.md`, renderProfileMarkdown(diskProfile));
+
+  const nextRootMd = renderProfileMarkdown(diskProfile);
+
+  // Skip root profile.md rewrite when content is unchanged. This keeps
+  // the human-visible file quiet when no preferences actually changed.
+  let shouldWriteRootMd = true;
+  try {
+    const onDisk = await native.readFile(`${root}/profile.md`);
+    if (onDisk.kind === "text" && onDisk.content === nextRootMd) {
+      shouldWriteRootMd = false;
+    }
+  } catch {
+    // no file or error -> write
+  }
+
+  if (shouldWriteRootMd) {
+    await writeFile(`${root}/profile.md`, nextRootMd);
+  }
+
+  // Domain split files are written when marked split (they are small and stable).
   for (const dp of Object.values(diskProfile.domains)) {
     if (dp.split && dp.splitPath) {
-      // Compute the directory part generically from the splitPath.
-      // This ensures we create the proper domain directory (e.g. .terax/design/) and place the profile file inside it,
-      // rather than accidentally creating a directory whose name is the filename.
       const lastSlashIdx = dp.splitPath.lastIndexOf("/");
       const dirPart =
         lastSlashIdx > 0 ? dp.splitPath.substring(0, lastSlashIdx) : "";
@@ -333,19 +319,6 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
       await writeFile(
         `${workspaceRoot.replace(/\/$/, "")}/${dp.splitPath}`,
         renderDomainProfileMarkdown(dp),
-      );
-    }
-  }
-  const snapshots = await storage.loadSnapshots(
-    profile.scope,
-    profile.projectRoot,
-  );
-  if (snapshots.length > 0) {
-    await ensureDir(`${root}/history`);
-    for (const snap of snapshots.slice(-20)) {
-      await writeFile(
-        `${root}/history/${snap.id}.json`,
-        JSON.stringify(snap, null, 2),
       );
     }
   }
@@ -533,19 +506,15 @@ export async function syncProfileFromDisk(projectRoot: string): Promise<void> {
   profile.domains = domains;
   profile.summary = generateSummary(updatedPrefs, DEFAULT_REFINEMENT_CONFIG);
 
-  // Note the self-write so the fs watcher events from this write (and the direct
-  // json write below) don't immediately re-trigger syncProfileFromDisk via
-  // notifyUserFileEdit and create a continuous modification loop on profile.json.
+  // Note the self-write so the fs watcher events from this write don't immediately
+  // re-trigger syncProfileFromDisk via notifyUserFileEdit.
   noteProfileSelfWrite();
 
   fsMirrorDisabled = true;
   try {
     await storage.saveProfile(profile);
-    const root = `${projectRoot.replace(/\/$/, "")}/.terax`;
-    await native.writeFile(
-      `${root}/profile.json`,
-      JSON.stringify(profile, null, 2),
-    );
+    // We intentionally do not write profile.json here anymore.
+    // profile.md is the source for humans and for loading artifacts.
   } finally {
     fsMirrorDisabled = false;
   }

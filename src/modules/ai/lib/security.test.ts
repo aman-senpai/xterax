@@ -113,7 +113,7 @@ describe("checkReadable — protected directories", () => {
     expect(checkWritable("/home/me/project/.terax/profile.md")).toMatchObject({
       ok: false,
     });
-    expect(checkWritable("/Users/me/terax-ai/.terax/history/snap.json")).toMatchObject({
+    expect(checkWritable("/Users/me/terax-ai/.terax/design/profile.md")).toMatchObject({
       ok: false,
     });
     expect(checkWritable(".terax/foo")).toMatchObject({ ok: false });

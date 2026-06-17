@@ -22,8 +22,7 @@
  *     preference candidates
  *   - running refinement to merge candidates into confidence-scored
  *     preferences and decide on domain splits
- *   - writing .terax/profile.json and .terax/profile.md (and split
- *     subdirectory files) without approval
+ *   - writing .terax/profile.md (and split subdirectory files) without approval
  *   - updating the engine's self-state (which sources of signal are
  *     yielding the most reliable preferences, so future extraction
  *     weights them higher)
@@ -297,8 +296,7 @@ export function notifyUserMessageSent(projectRootOverride?: string | null): void
 export function notifyUserFileEdit(filePath: string, summary: string): void {
   const isProfileFile =
     filePath.endsWith("/.terax/profile.md") ||
-    filePath.endsWith("/.terax/profile.json") ||
-    filePath.includes("/.terax/");  // catch any file inside .terax/ (root profile, domain subs, history, etc.) for self-write guards
+    filePath.includes("/.terax/");  // catch any file inside .terax/ (root + domain split profiles) for self-write guards
   if (isProfileFile) {
     if (projectRoot) {
       void import("./storage").then(async (m) => {

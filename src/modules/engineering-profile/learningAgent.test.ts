@@ -145,6 +145,7 @@ import {
   getAgentState,
   notifyChatTurnFinished,
   notifySignalRecorded,
+  notifyUserMessageSent,
   startLearningAgent,
   subscribeAgent,
 } from "./learningAgent";
@@ -204,10 +205,10 @@ describe("LearningAgent — autonomous continuous learning", () => {
     expect(refineProfileMock.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
-  it("refines when notifyChatTurnFinished is called after a signal burst", async () => {
+  it("refines when notifyUserMessageSent is called after a signal burst", async () => {
     startLearningAgent("/test");
     notifySignalRecorded(makeSignal({ id: "s1" }));
-    notifyChatTurnFinished();
+    notifyUserMessageSent("/test");
     await new Promise((r) => setTimeout(r, 50));
     expect(refineProfileMock).toHaveBeenCalled();
   });

@@ -715,7 +715,7 @@ Bad examples (one-off or non-generalizable — ignore for long-term taste):
 
 Produce output that already respects the recorded preferences from the provided PROJECT PROFILE context. The profile improves over time from background observation.
 
-**Critical protection:** '.terax/' (profile.md, profile.json, history/ etc.) is managed exclusively by the autonomous learning system and is protected from modification. The main agent and all subagents **must never** write, edit, delete, rename, or run shell commands that mutate anything inside '.terax/'. Attempts will be refused by security checks. You may read the files if needed, but do not modify them. This isolation keeps learning precise and reliable.
+**Critical protection:** '.terax/' (profile.md and any domain sub-profiles) is managed exclusively by the autonomous learning system and is protected from modification. The main agent and all subagents **must never** write, edit, delete, rename, or run shell commands that mutate anything inside '.terax/'. Attempts will be refused by security checks. You may read the files if needed, but do not modify them. This isolation keeps learning precise and reliable.
 
 `;
 

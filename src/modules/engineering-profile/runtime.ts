@@ -81,13 +81,10 @@ export async function loadProfiles(
 
 /**
  * Loads the on-disk profile artifacts. The agent always reads the root
- * `profile.md` first; if the loaded profile JSON indicates any domain
- * is split into its own subdirectory file, those are loaded too.
+ * `profile.md` first; split domains (if any) are discovered by scanning
+ * for "- See .terax/<domain>/profile.md" references inside the root md.
  *
- * Returns the concatenated markdown, token-bounded. Split subdirectory
- * files are loaded only when the JSON claims they exist (i.e. when
- * refinement has decided the domain is significant enough to split).
- * The function never reads files that the JSON does not point at.
+ * Returns the concatenated markdown, token-bounded.
  */
 export async function loadProfileArtifacts(
   workspaceRoot: string | null,
@@ -107,7 +104,6 @@ export async function loadProfileArtifacts(
     };
   }
   const rootMdPath = `${workspaceRoot.replace(/\/$/, "")}/.terax/profile.md`;
-  const rootJsonPath = `${workspaceRoot.replace(/\/$/, "")}/.terax/profile.json`;
   const rootBody = await readTextFile(rootMdPath);
   if (rootBody === null) {
     return {
@@ -117,21 +113,17 @@ export async function loadProfileArtifacts(
       totalTokens: 0,
     };
   }
-  let splitPaths: string[] = [];
-  try {
-    const r = await native.readFile(rootJsonPath);
-    if (r.kind === "text") {
-      try {
-        const profile = JSON.parse(r.content) as Profile;
-        splitPaths = Object.values(profile.domains ?? {})
-          .filter((d) => d.split && d.splitPath)
-          .map((d) => d.splitPath as string);
-      } catch {
-        splitPaths = [];
-      }
+
+  // Discover splits from the human-readable profile.md (the "- See ..." lines
+  // emitted by renderProfileMarkdown when a domain is split).
+  const splitPaths: string[] = [];
+  const seeRe = /- See\s+([^\s)]+profile\.md)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = seeRe.exec(rootBody)) !== null) {
+    const p = m[1];
+    if (p.startsWith(".terax/") || p.includes("/.terax/")) {
+      splitPaths.push(p);
     }
-  } catch {
-    splitPaths = [];
   }
   const blocks: string[] = [rootBody];
   const includedSplits: string[] = [];

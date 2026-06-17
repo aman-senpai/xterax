@@ -1,14 +1,12 @@
 import { native } from "@/modules/ai/lib/native";
-import type { Profile } from "./types";
 
 /**
  * Lazily creates the .terax/ directory on first use.
  *
  * The system must not pre-create a directory hierarchy. The minimum
- * required artifacts are:
+ * required artifact is:
  *
- *   .terax/profile.md      (canonical, human-readable root)
- *   .terax/profile.json    (canonical, machine-readable root)
+ *   .terax/profile.md      (human-readable root profile)
  *
  * Domain subdirectories (.terax/<domain>/profile.md) are created
  * lazily by the refinement workflow when a domain's split thresholds
@@ -25,18 +23,11 @@ export async function ensureBootstrap(workspaceRoot: string): Promise<boolean> {
     return false;
   }
   const profileMdPath = `${root}/profile.md`;
-  const profileJsonPath = `${root}/profile.json`;
   const existingMd = await readText(profileMdPath);
-  const existingJson = await readText(profileJsonPath);
   if (existingMd === null) {
     // Prevent any immediate fs:changed → notifyUserFileEdit echo loop on first creation.
     try { (await import("./storage")).noteProfileSelfWrite?.(); } catch {}
     await writeFile(profileMdPath, renderInitialProfileMd(workspaceRoot));
-  }
-  if (existingJson === null) {
-    const initial = makeEmptyProfile(workspaceRoot);
-    try { (await import("./storage")).noteProfileSelfWrite?.(); } catch {}
-    await writeFile(profileJsonPath, JSON.stringify(initial, null, 2));
   }
   return true;
 }
@@ -77,17 +68,7 @@ async function writeFile(path: string, content: string): Promise<void> {
   await native.writeFile(path, content);
 }
 
-function makeEmptyProfile(workspaceRoot: string): Profile {
-  return {
-    id: "empty",
-    scope: "project",
-    projectRoot: workspaceRoot,
-    generatedAt: 0,
-    summary: "",
-    preferences: [],
-    domains: {},
-  };
-}
+
 
 function renderInitialProfileMd(workspaceRoot: string): string {
   return `# Profile
