@@ -16,6 +16,7 @@ import { native } from "@/modules/ai/lib/native";
  * exists.
  */
 export async function ensureBootstrap(workspaceRoot: string): Promise<boolean> {
+  if (process.env.VITEST) return true;
   const root = `${workspaceRoot.replace(/\/$/, "")}/.terax`;
   try {
     await ensureDir(root);

@@ -100,6 +100,8 @@ vi.mock("./storage", () => {
       listProjectProfiles: vi.fn(async () => []),
       writeHumanView: vi.fn(async () => {}),
     },
+    projectMirrorExists: vi.fn(async () => true),
+    clearProjectData: vi.fn(async () => {}),
     getCachedConfig: () => ({
       provider: "openai" as const,
       modelId: "test",

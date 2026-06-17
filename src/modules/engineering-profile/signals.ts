@@ -5,7 +5,7 @@ import {
   type Signal,
   type SignalSource,
 } from "./types";
-import { newSignalId, storage } from "./storage";
+import { newSignalId, storage, projectMirrorExists, clearProjectData } from "./storage";
 import { ensureBootstrap } from "./bootstrap";
 
 export type RecordSignalInput = {
@@ -79,6 +79,12 @@ export async function recordSignal(
     weight: clampWeight(input.weight ?? 1),
   };
   if (projectRoot) {
+    // Before (re)creating the mirror, check if it was missing. If the user
+    // deleted .terax/, this is a reset signal: clear global store data first
+    // so we start the new .terax/ from a true blank canvas.
+    if (!(await projectMirrorExists(projectRoot))) {
+      await clearProjectData(projectRoot);
+    }
     await ensureBootstrap(projectRoot);
   }
   await storage.appendSignal(signal);

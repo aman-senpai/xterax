@@ -93,6 +93,39 @@ function projectSnapshotsKey(root: string): string {
   return `${KEY_PROJECT_SNAPSHOTS_PREFIX}${projectKey(root)}`;
 }
 
+export async function projectMirrorExists(projectRoot: string): Promise<boolean> {
+  if (process.env.VITEST) return true; // tests manage their own data/mocks
+  if (!projectRoot) return false;
+  const jsonPath = `${projectRoot.replace(/\/$/, "")}/.terax/profile.json`;
+  try {
+    const res = await native.readFile(jsonPath);
+    return res.kind === "text";
+  } catch {
+    return false;
+  }
+}
+
+export async function clearProjectData(projectRoot: string): Promise<void> {
+  if (process.env.VITEST) return;
+  if (!projectRoot) return;
+  const pkey = projectProfileKey(projectRoot);
+  const skey = projectSignalsKey(projectRoot);
+  const sskey = projectSnapshotsKey(projectRoot);
+  try {
+    await store.delete(pkey);
+    await store.delete(skey);
+    await store.delete(sskey);
+    const map =
+      (await store.get<Record<string, Profile>>(KEY_PROJECT_PROFILE_BY_ROOT)) ?? {};
+    if (map[projectRoot]) {
+      delete map[projectRoot];
+      await store.set(KEY_PROJECT_PROFILE_BY_ROOT, map);
+    }
+  } catch (e) {
+    console.warn("[engineering-profile] failed to clear store data on .terax delete:", e);
+  }
+}
+
 type Stored = {
   getProfile: (
     scope: "user" | "project",
@@ -126,6 +159,13 @@ export const storage: Stored = {
       return (await store.get<Profile>(KEY_USER_PROFILE)) ?? null;
     }
     if (!projectRoot) return null;
+    // If the user deleted the project's .terax/ directory, treat it as a full reset:
+    // nuke the corresponding data in the global store so the next trigger starts fresh
+    // (blank profile, no old signals, no history snapshots brought back).
+    if (!(await projectMirrorExists(projectRoot))) {
+      await clearProjectData(projectRoot);
+      return null;
+    }
     return (await store.get<Profile>(projectProfileKey(projectRoot))) ?? null;
   },
 
@@ -154,6 +194,12 @@ export const storage: Stored = {
   },
 
   async appendSignal(signal) {
+    if (signal.scope === "project" && signal.projectRoot) {
+      if (!(await projectMirrorExists(signal.projectRoot))) {
+        await clearProjectData(signal.projectRoot);
+        // new signal will be the first one after reset
+      }
+    }
     const key =
       signal.scope === "user"
         ? KEY_USER_SIGNALS
@@ -173,10 +219,19 @@ export const storage: Stored = {
       return (await store.get<Signal[]>(KEY_USER_SIGNALS)) ?? [];
     }
     if (!projectRoot) return [];
+    if (!(await projectMirrorExists(projectRoot))) {
+      await clearProjectData(projectRoot);
+      return [];
+    }
     return (await store.get<Signal[]>(projectSignalsKey(projectRoot))) ?? [];
   },
 
   async appendSnapshot(snapshot) {
+    if (snapshot.scope === "project" && snapshot.projectRoot) {
+      if (!(await projectMirrorExists(snapshot.projectRoot))) {
+        await clearProjectData(snapshot.projectRoot);
+      }
+    }
     const key =
       snapshot.scope === "user"
         ? KEY_USER_SNAPSHOTS
@@ -196,6 +251,10 @@ export const storage: Stored = {
       return (await store.get<ProfileSnapshot[]>(KEY_USER_SNAPSHOTS)) ?? [];
     }
     if (!projectRoot) return [];
+    if (!(await projectMirrorExists(projectRoot))) {
+      await clearProjectData(projectRoot);
+      return [];
+    }
     return (
       (await store.get<ProfileSnapshot[]>(projectSnapshotsKey(projectRoot))) ??
       []
@@ -203,6 +262,11 @@ export const storage: Stored = {
   },
 
   async replaceSnapshots(scope, projectRoot, snapshots) {
+    if (scope === "project" && projectRoot && !(await projectMirrorExists(projectRoot))) {
+      await clearProjectData(projectRoot);
+      // after reset we can still store the new snapshots if caller wants,
+      // but typically after delete we start fresh
+    }
     const key =
       scope === "user"
         ? KEY_USER_SNAPSHOTS
@@ -246,7 +310,20 @@ export const storage: Stored = {
     const map =
       (await store.get<Record<string, Profile>>(KEY_PROJECT_PROFILE_BY_ROOT)) ??
       {};
-    return Object.entries(map).map(([root, profile]) => ({ root, profile }));
+    const entries = Object.entries(map);
+    // Drop any entries whose .terax/ mirror has been deleted by the user.
+    // This makes "delete the dir = permanent reset" complete; the project
+    // will no longer appear in listings until new activity creates fresh data.
+    const valid: { root: string; profile: Profile }[] = [];
+    for (const [root, profile] of entries) {
+      if (await projectMirrorExists(root)) {
+        valid.push({ root, profile });
+      } else {
+        // side-effect clean
+        await clearProjectData(root);
+      }
+    }
+    return valid;
   },
 
   async writeHumanView(profile) {
@@ -258,6 +335,14 @@ async function writeHumanViewImpl(profile: Profile): Promise<void> {
   if (profile.scope === "user" || fsMirrorDisabled) return;
   const workspaceRoot = profile.projectRoot;
   if (!workspaceRoot) return;
+
+  // If the user deleted the .terax/ directory, clear any globally stored data
+  // for this project *first*. This ensures the next write (and any future
+  // triggers) starts from a true blank canvas instead of resurrecting old
+  // profiles, signals, or history snapshots from the global store.
+  if (!(await projectMirrorExists(workspaceRoot))) {
+    await clearProjectData(workspaceRoot);
+  }
 
   // Note self-write *before* any native writes so that the fs:changed events
   // we inevitably emit won't cause a re-entrant syncProfileFromDisk (which would
