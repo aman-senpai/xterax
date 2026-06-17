@@ -1,5 +1,7 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import type { CustomEndpoint } from "../config";
+import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 
 export type SessionMeta = {
   id: string;
@@ -77,4 +79,133 @@ export function deriveTitle(messages: UIMessage[]): string {
     }
   }
   return "New chat";
+}
+
+export type TitleGenLocalConfig = {
+  lmstudioBaseURL?: string;
+  lmstudioModelId?: string;
+  mlxBaseURL?: string;
+  mlxModelId?: string;
+  ollamaBaseURL?: string;
+  ollamaModelId?: string;
+  openaiCompatibleBaseURL?: string;
+  openaiCompatibleModelId?: string;
+  openrouterModelId?: string;
+  customEndpoints?: readonly CustomEndpoint[];
+  customEndpointKeys?: CustomEndpointKeys;
+};
+
+const TITLE_SYSTEM = `You create concise, informative titles for AI chat threads in a coding assistant.
+
+Given the opening of a conversation, reply with exactly one title of 3-8 words that captures the main goal or topic.
+
+Rules:
+- Be specific and include key details from the user's request (tech, file, error, feature).
+- Do not start with "Help", "Question", "How to", "Chat", "New".
+- No quotes, no trailing punctuation, no markdown.
+- Output only the title on a single line.`;
+
+export async function generateSessionTitle(
+  messages: UIMessage[],
+  modelId: string,
+  keys: ProviderKeys,
+  local: TitleGenLocalConfig,
+): Promise<string | null> {
+  const context = buildTitlePromptContext(messages);
+  if (!context) return null;
+
+  try {
+    const [{ buildConfiguredLanguageModel }, { generateText }] =
+      await Promise.all([import("@/modules/ai/lib/agent"), import("ai")]);
+
+    const model = await buildConfiguredLanguageModel(modelId, keys, {
+      lmstudioBaseURL: local.lmstudioBaseURL,
+      lmstudioModelId: local.lmstudioModelId,
+      mlxBaseURL: local.mlxBaseURL,
+      mlxModelId: local.mlxModelId,
+      ollamaBaseURL: local.ollamaBaseURL,
+      ollamaModelId: local.ollamaModelId,
+      openaiCompatibleBaseURL: local.openaiCompatibleBaseURL,
+      openaiCompatibleModelId: local.openaiCompatibleModelId,
+      openrouterModelId: local.openrouterModelId,
+      customEndpoints: local.customEndpoints,
+      customEndpointKeys: local.customEndpointKeys,
+    });
+
+    const { text } = await generateText({
+      model,
+      system: TITLE_SYSTEM,
+      prompt: context,
+      maxOutputTokens: 40,
+      temperature: 0.2,
+      maxRetries: 0,
+    });
+
+    return cleanLlmTitle(text);
+  } catch {
+    return null;
+  }
+}
+
+function buildTitlePromptContext(messages: UIMessage[]): string | null {
+  const parts: string[] = [];
+  let users = 0;
+  for (const m of messages) {
+    if (m.role === "user") {
+      const t = cleanForTitle(extractTextContent(m)).slice(0, 700);
+      if (t) {
+        parts.push(`User: ${t}`);
+        users++;
+      }
+    } else if (m.role === "assistant" && parts.length > 0) {
+      const t = cleanForTitle(extractTextContent(m)).slice(0, 400);
+      if (t) parts.push(`Assistant: ${t}`);
+    }
+    if (users >= 2) break;
+  }
+  if (parts.length === 0) return null;
+  return parts.join("\n\n");
+}
+
+function extractTextContent(m: UIMessage): string {
+  let out = "";
+  for (const p of m.parts ?? []) {
+    if ((p as { type?: string }).type === "text") {
+      out += `${(p as { text?: string }).text ?? ""}\n`;
+    }
+  }
+  return out;
+}
+
+function cleanForTitle(s: string): string {
+  return s
+    .replace(/<terminal-context[\s\S]*?<\/terminal-context>/g, "")
+    .replace(/<selection[\s\S]*?<\/selection>/g, "")
+    .replace(/<file[\s\S]*?<\/file>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanLlmTitle(raw: string): string | null {
+  let t = (raw || "").trim();
+  if (!t) return null;
+  // strip code fences or leading labels
+  t = t.replace(/^```[\s\S]*?```$/g, (m) => m.replace(/```/g, ""));
+  t = t.replace(/^(title|name):\s*/i, "");
+  // first line only
+  t = t.split(/\r?\n/)[0].trim();
+  // strip wrapping quotes/punct
+  t = t.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
+  t = t.replace(/[.!?;:,]+$/g, "").trim();
+  // length bounds
+  if (t.length < 3) return null;
+  if (t.length > 72) {
+    t = `${t.slice(0, 69).trim()}…`;
+  }
+  // word count soft guidance (3-9 words target)
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 9) {
+    t = `${words.slice(0, 8).join(" ")}…`;
+  }
+  return t || null;
 }

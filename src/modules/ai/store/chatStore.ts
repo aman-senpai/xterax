@@ -1,3 +1,4 @@
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 import {
@@ -5,30 +6,32 @@ import {
   endpointIdFromCompatModel,
   getModel,
   isCompatModelId,
-  providerNeedsKey,
   type ModelId,
   type ProviderId,
+  providerNeedsKey,
 } from "../config";
-import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from "../lib/thinking";
-import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import {
+  type CustomEndpointKeys,
   EMPTY_PROVIDER_KEYS,
   type ProviderKeys,
-  type CustomEndpointKeys,
 } from "../lib/keyring";
+import { pushRecentModel } from "../lib/modelPrefs";
 import {
   deleteSessionData,
   deriveTitle,
+  generateSessionTitle,
   loadAll,
   loadMessages,
   newSessionId,
+  type SessionMeta,
   saveActiveId,
   saveMessages,
   saveSessionsList,
-  type SessionMeta,
+  type TitleGenLocalConfig,
 } from "../lib/sessions";
-import { pushRecentModel } from "../lib/modelPrefs";
+import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from "../lib/thinking";
+import { useTodosStore } from "./todoStore";
 
 export type PermissionMode = "default" | "auto-approve" | "read-only";
 
@@ -194,6 +197,10 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
 // when the matching Chat is constructed.
 export const seedMessages = new Map<string, UIMessage[]>();
 
+// Track sessions for which we have already kicked off LLM title generation.
+// Ensures we generate exactly once per session while it is still auto-titled.
+const titleGenAttempted = new Set<string>();
+
 // Trailing debounce for per-token message persistence. Streaming fires
 // `persistMessages` on every token; without this we'd JSON-serialize the
 // full message array and round-trip to the store plugin per token, which
@@ -318,6 +325,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       freshId = reusable.id;
     } else {
       freshId = newSessionId();
+      titleGenAttempted.delete(freshId);
       const fresh: SessionMeta = {
         id: freshId,
         title: "New chat",
@@ -338,6 +346,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   newSession: () => {
     const id = newSessionId();
+    titleGenAttempted.delete(id);
     const meta: SessionMeta = {
       id,
       title: "New chat",
@@ -381,12 +390,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
       clearTimeout(pend.timer);
       pendingPersist.delete(id);
     }
+    titleGenAttempted.delete(id);
     void deleteSessionData(id);
     void useTodosStore.getState().clearSession(id);
 
     if (remaining.length === 0) {
+      const freshId = newSessionId();
+      titleGenAttempted.delete(freshId);
       const fresh: SessionMeta = {
-        id: newSessionId(),
+        id: freshId,
         title: "New chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -430,15 +442,68 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
-    const isUntitled = !meta.title || meta.title === "New chat";
-    if (!isUntitled) return;
-    const nextTitle = deriveTitle(messages);
-    if (nextTitle === meta.title) return;
-    const next = sessions.map((s) =>
-      s.id === id ? { ...s, title: nextTitle, updatedAt: Date.now() } : s,
-    );
-    set({ sessions: next });
-    void saveSessionsList(next);
+
+    const quickTitle = deriveTitle(messages);
+
+    // Apply a fast, synchronous title derived from the first user message
+    // so the session list is immediately useful while the LLM title is generated.
+    if (quickTitle && quickTitle !== "New chat" && quickTitle !== meta.title) {
+      const next = sessions.map((s) =>
+        s.id === id ? { ...s, title: quickTitle, updatedAt: Date.now() } : s,
+      );
+      set({ sessions: next });
+      void saveSessionsList(next);
+    }
+
+    // Kick off a single async LLM title generation for this session.
+    // It will only apply the result if the title is still the placeholder
+    // or the quick derive we just set (i.e. user has not manually renamed).
+    if (!titleGenAttempted.has(id) && quickTitle && quickTitle !== "New chat") {
+      titleGenAttempted.add(id);
+      const baseTitle = quickTitle;
+      void (async () => {
+        try {
+          const state = get();
+          const prefs = usePreferencesStore.getState();
+          const local: TitleGenLocalConfig = {
+            lmstudioBaseURL: prefs.lmstudioBaseURL,
+            lmstudioModelId: prefs.lmstudioModelId,
+            mlxBaseURL: prefs.mlxBaseURL,
+            mlxModelId: prefs.mlxModelId,
+            ollamaBaseURL: prefs.ollamaBaseURL,
+            ollamaModelId: prefs.ollamaModelId,
+            openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL,
+            openaiCompatibleModelId: prefs.openaiCompatibleModelId,
+            openrouterModelId: prefs.openrouterModelId,
+            customEndpoints: prefs.customEndpoints,
+            customEndpointKeys: state.customEndpointKeys,
+          };
+          const llmTitle = await generateSessionTitle(
+            messages,
+            state.selectedModelId,
+            state.apiKeys,
+            local,
+          );
+          if (!llmTitle) return;
+          const latestSessions = get().sessions;
+          const m = latestSessions.find((s) => s.id === id);
+          if (!m) return;
+          const stillAuto =
+            !m.title || m.title === "New chat" || m.title === baseTitle;
+          if (stillAuto && llmTitle !== m.title) {
+            const next = latestSessions.map((s) =>
+              s.id === id
+                ? { ...s, title: llmTitle, updatedAt: Date.now() }
+                : s,
+            );
+            set({ sessions: next });
+            void saveSessionsList(next);
+          }
+        } finally {
+          // keep in attempted so we don't retry on future persists
+        }
+      })();
+    }
   },
 }));
 
