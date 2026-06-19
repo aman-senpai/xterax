@@ -73,6 +73,16 @@ export function newPreferenceId(): string {
   return newId("pref");
 }
 
+function makeCanonicalRuleId(category: string, preference: string): string {
+  const slug = preference
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 64);
+  return `${category.trim().toLowerCase().replace(/\s+/g, "-")}_${slug}`;
+}
+
 export function newSnapshotId(): string {
   return newId("snap");
 }
@@ -96,9 +106,9 @@ function projectSnapshotsKey(root: string): string {
 export async function projectMirrorExists(projectRoot: string): Promise<boolean> {
   if (process.env.VITEST) return true; // tests manage their own data/mocks
   if (!projectRoot) return false;
-  const jsonPath = `${projectRoot.replace(/\/$/, "")}/.xterax/profile.json`;
+  const mdPath = `${projectRoot.replace(/\/$/, "")}/.xterax/profile.md`;
   try {
-    const res = await native.readFile(jsonPath);
+    const res = await native.readFile(mdPath);
     return res.kind === "text";
   } catch {
     return false;
@@ -425,13 +435,6 @@ function renderProfileMarkdown(profile: Profile): string {
   const lines: string[] = [];
   lines.push("# Profile");
   lines.push("");
-  lines.push(
-    "This is the project's living profile — the continuously self-improving memory of choices, structures, patterns, tooling preferences, and micro-decisions.",
-  );
-  lines.push(
-    "It is updated autonomously from signals (explicit statements, accepts, rejections, edits, and the self-aware RL feedback loop). Never ask the user to repeat their profile.",
-  );
-  lines.push("");
   const domainList = Object.values(profile.domains)
     .filter((d) => !d.split)
     .sort((a, b) => b.preferences.length - a.preferences.length);
@@ -440,7 +443,7 @@ function renderProfileMarkdown(profile: Profile): string {
     lines.push(`# ${dp.category}`);
     lines.push("");
     for (const p of dp.preferences) {
-      lines.push(renderPreferenceLine(p));
+      lines.push(`- ${p.preference}. Confidence: ${p.confidence.toFixed(2)}`);
     }
     lines.push("");
   }
@@ -460,19 +463,10 @@ function renderDomainProfileMarkdown(dp: Profile["domains"][string]): string {
   const lines: string[] = [];
   lines.push(`# ${dp.category}`);
   lines.push("");
-  lines.push(
-    "Composable sub-profile for this domain. Part of the project's profile.",
-  );
-  lines.push("");
   for (const p of dp.preferences) {
-    lines.push(renderPreferenceLine(p));
+    lines.push(`- ${p.preference}. Confidence: ${p.confidence.toFixed(2)}`);
   }
   return lines.join("\n");
-}
-
-function renderPreferenceLine(p: Preference): string {
-  const prefix = p.pinned ? "Pinned: " : "";
-  return `- ${prefix}${p.preference}. Confidence: ${p.confidence.toFixed(2)}`;
 }
 
 export async function syncProfileFromDisk(projectRoot: string): Promise<void> {
@@ -523,13 +517,18 @@ export async function syncProfileFromDisk(projectRoot: string): Promise<void> {
         preference: parsedPref.preference,
         confidence: parsedPref.confidence,
         pinned: parsedPref.pinned,
+        reinforcement: (matched.reinforcement ?? 0) + 1,
+        canonicalRuleId: matched.canonicalRuleId,
       });
     } else {
+      const newId = newPreferenceId();
       updatedPrefs.push({
-        id: newPreferenceId(),
+        id: newId,
+        canonicalRuleId: makeCanonicalRuleId(parsedPref.category, parsedPref.preference),
         category: parsedPref.category as Domain,
         preference: parsedPref.preference,
         confidence: parsedPref.confidence,
+        reinforcement: 1,
         evidenceCount: 1,
         firstObservedAt: Date.now(),
         lastObservedAt: Date.now(),
@@ -630,15 +629,22 @@ async function parseProfileMarkdown(
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    if (trimmed.startsWith("# ")) {
-      const heading = trimmed.slice(2).trim();
-      const cleanHeading = heading
-        .replace(/\s*\(Continuously Learned by Xterax\)/i, "")
-        .replace(/^Taste\s*[-—]?\s*/i, "")
-        .trim();
-      const lower = cleanHeading.toLowerCase();
+    if (trimmed.startsWith("## ")) {
+      // Backward-compat: old "## category" domain headings
+      const heading = trimmed.slice(3).trim();
+      const lower = heading.toLowerCase();
       if (lower !== "engineering profile" && lower !== "profile" && lower !== "taste") {
-        currentCategory = cleanHeading.toLowerCase();
+        currentCategory = lower;
+      }
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      // "# Profile" is the root heading — skip.
+      // Any other "# something" is a domain heading.
+      const heading = trimmed.slice(2).trim();
+      const lower = heading.toLowerCase();
+      if (lower !== "engineering profile" && lower !== "profile" && lower !== "taste") {
+        currentCategory = lower;
       }
       continue;
     }
@@ -718,38 +724,36 @@ function parsePreferenceLine(
   confidence: number;
   pinned: boolean;
 } | null {
-  const confidenceRegex = /Confidence:\s*([0-9.]+)/i;
-  const match = text.match(confidenceRegex);
+  let cleanText = text.trim();
   let confidence = 0.5;
-  let cleanText = text;
 
-  if (match) {
-    confidence = parseFloat(match[1]);
-    cleanText = text.replace(confidenceRegex, "").trim();
-    if (cleanText.endsWith(".")) {
-      cleanText = cleanText.slice(0, -1).trim();
-    }
+  // Format: "- Preference text. Confidence: 0.85"
+  const confMatch = cleanText.match(/Confidence:\s*([0-9.]+)\s*$/i);
+  if (confMatch) {
+    confidence = parseFloat(confMatch[1]);
+    cleanText = cleanText.slice(0, confMatch.index).trim();
+    if (cleanText.endsWith(".")) cleanText = cleanText.slice(0, -1).trim();
   }
 
-  cleanText = cleanText.replace(/\s*\([^)]+\)$/g, "").trim();
-  if (cleanText.endsWith(".")) {
-    cleanText = cleanText.slice(0, -1).trim();
-  }
+  // Strip any trailing parenthesized metadata (old format compat)
+  cleanText = cleanText.replace(/\s*\([^)]+\)\s*$/g, "").trim();
+  if (cleanText.endsWith(".")) cleanText = cleanText.slice(0, -1).trim();
 
+  // [pinned] suffix
   let pinned = false;
-  if (cleanText.toLowerCase().startsWith("pinned:")) {
+  if (/\[pinned\]\s*$/i.test(cleanText)) {
+    pinned = true;
+    cleanText = cleanText.replace(/\s*\[pinned\]\s*$/i, "").trim();
+  }
+  // Old "Pinned: " prefix
+  if (!pinned && cleanText.toLowerCase().startsWith("pinned:")) {
     pinned = true;
     cleanText = cleanText.slice(7).trim();
   }
 
   if (!cleanText) return null;
 
-  return {
-    category,
-    preference: cleanText,
-    confidence,
-    pinned,
-  };
+  return { category, preference: cleanText, confidence, pinned };
 }
 
 export function makeBlankProfile(

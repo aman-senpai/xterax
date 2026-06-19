@@ -9,7 +9,8 @@ import { storage } from "./storage";
 import { refineProfile } from "./refinement";
 import type { ExtractorDeps } from "./extraction";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { MODELS, providerNeedsKey, type ProviderId } from "@/modules/ai/config";
+
+import { resolveProfileModelSelection } from "./profileModel";
 
 /**
  * Auto-refinement: triggers a profile refinement pass after a chat turn
@@ -29,8 +30,9 @@ const inFlight = new Map<string, Promise<void>>();
 const lastRanAt = new Map<string, number>();
 
 /**
- * Shared refinement lock keyed by {scope}:{projectRoot}.
- * All refinement paths must check this before starting a pass.
+ * Acquire the refinement lock atomically. Sets an immediate sentinel in
+ * the inFlight map so concurrent callers cannot both pass the check before
+ * either registers the job. Returns true if the lock was acquired.
  */
 export function acquireRefineLock(
   scope: "user" | "project",
@@ -38,6 +40,9 @@ export function acquireRefineLock(
 ): boolean {
   const key = scopeKey(scope, projectRoot);
   if (inFlight.has(key)) return false;
+  // Atomically set a sentinel — JS is single-threaded for sync code so
+  // no other caller can pass the .has() check between our check and set.
+  inFlight.set(key, Promise.resolve());
   return true;
 }
 
@@ -115,45 +120,18 @@ export function makeExtractorDeps(): ExtractorDeps {
   const chat = useChatStore.getState();
   const prefs = usePreferencesStore.getState();
 
-  let provider: string;
-  let modelId: string;
+  const selection = resolveProfileModelSelection({
+    profileProvider: prefs.profileProvider,
+    profileModelId: prefs.profileModelId ?? "",
+    selectedModelId: chat.selectedModelId,
+    defaultModelId: prefs.defaultModelId,
+    customEndpoints: prefs.customEndpoints,
+    apiKeys: chat.apiKeys,
+  });
+  const provider = selection.provider;
+  const resolvedModelId = selection.registryModelId;
 
-  const explicitModelId = prefs.profileModelId;
-  const explicitProvider = prefs.profileProvider;
-
-  if (explicitModelId && explicitProvider && (explicitProvider as string) !== "heuristic") {
-    provider = explicitProvider;
-    modelId = explicitModelId;
-  } else {
-    const activeModelId = chat.selectedModelId || prefs.defaultModelId;
-    if (!activeModelId) {
-      const fallback = MODELS[0];
-      provider = fallback.provider;
-      modelId = fallback.id;
-    } else {
-      const parts = activeModelId.split(":");
-      provider = parts[0];
-      modelId = parts.slice(1).join(":");
-    }
-  }
-
-  const isLocal = !providerNeedsKey(provider as ProviderId);
-  const fallback = MODELS[0];
-  const currentModel = isLocal
-    ? (MODELS.find((m) => m.provider === provider) ?? fallback)
-    : (MODELS.find((m) => m.provider === provider && m.id === modelId) ??
-      MODELS.find((m) => m.id === modelId) ??
-      fallback);
-  const resolvedModelId = currentModel.id;
-
-  // For DeepSeek in the profile refinement extractor (generateObject for
-  // structured candidates + mergedPriorIds), we must use the non-thinking
-  // payload (thinking disabled or omitted). Enabling thinking/reasoning
-  // makes the model emit internal reasoning before the structured output,
-  // which breaks reliable Zod schema extraction in generateObject — even
-  // though the main chat streamText works fine with thinking enabled.
-  // Autocomplete already forces this for DeepSeek for the same reason.
-  // The main chat can still use the user's chosen thinking level.
+  // DeepSeek thinking breaks generateObject structured extraction; chat can keep thinking on.
   const effectiveThinkingLevel =
     provider === "deepseek" ? "off" : prefs.profileThinkingLevel;
 

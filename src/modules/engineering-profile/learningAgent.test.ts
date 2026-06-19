@@ -4,11 +4,16 @@ const {
   refineProfileMock,
   appendSignalMock,
   recordTurnAcceptanceMock,
+  observeUserMessageMock,
   signals,
 } = vi.hoisted(() => {
   const signals: unknown[] = [];
   return {
     recordTurnAcceptanceMock: vi.fn(async () => []),
+    observeUserMessageMock: vi.fn(async () => ({
+      recorded: [],
+      skipped: [],
+    })),
     refineProfileMock: vi.fn(async () => ({
       profile: {
         id: "p1",
@@ -31,6 +36,10 @@ const {
     signals,
   };
 });
+
+vi.mock("./observer", () => ({
+  observeUserMessage: observeUserMessageMock,
+}));
 
 vi.mock("./refinement", () => ({
   refineProfile: refineProfileMock,
@@ -102,6 +111,8 @@ vi.mock("./storage", () => {
     },
     projectMirrorExists: vi.fn(async () => true),
     clearProjectData: vi.fn(async () => {}),
+    getLastProfileSelfWrite: vi.fn(() => 0),
+    syncProfileFromDisk: vi.fn(async () => {}),
     getCachedConfig: () => ({
       provider: "openai" as const,
       modelId: "test",
@@ -137,7 +148,7 @@ vi.mock("@/modules/ai/store/chatStore", () => ({
   useChatStore: {
     getState: () => ({
       apiKeys: { openai: "sk-test" },
-      selectedModelId: "openai:gpt-5",
+      selectedModelId: "gpt-5.4-mini",
     }),
   },
 }));
@@ -147,6 +158,7 @@ import {
   getAgentState,
   notifyChatTurnFinished,
   notifySignalRecorded,
+  notifyUserFileEdit,
   notifyUserMessageSent,
   startLearningAgent,
   subscribeAgent,
@@ -213,6 +225,24 @@ describe("LearningAgent — autonomous continuous learning", () => {
     notifyUserMessageSent("/test");
     await new Promise((r) => setTimeout(r, 50));
     expect(refineProfileMock).toHaveBeenCalled();
+  });
+
+  it("does not observe .xterax paths as user preference edits", () => {
+    startLearningAgent("/test");
+    observeUserMessageMock.mockClear();
+    notifyUserFileEdit("/test/.xterax", "user edited file");
+    notifyUserFileEdit("/test/.xterax/profile.md", "user edited file");
+    expect(observeUserMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not observe non-profile file edits (synthetic 'User edited' messages are rejected)", () => {
+    startLearningAgent("/test");
+    observeUserMessageMock.mockClear();
+    notifyUserFileEdit("/test/src/foo.ts", "user edited file");
+    // Non-.xterax file edits no longer feed synthetic text to the observer.
+    // The "User edited <path>: <summary>" string was always rejected by
+    // isSyntheticObservationMessage in observer.ts — dead code removed.
+    expect(observeUserMessageMock).not.toHaveBeenCalled();
   });
 
   it("records signals asynchronously when recordSignal is called", async () => {

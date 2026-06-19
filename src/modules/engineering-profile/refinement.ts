@@ -1,17 +1,14 @@
 import {
-  aggregateScore,
-  applyKlAnchor,
-  clamp01,
-  distinctSourceCount,
-  normalizeConfidence,
   normalizeText,
   // preferenceKey is used inside the exported buildFallbackCandidates helper (tested directly).
   preferenceKey,
 } from "./confidence";
+import { isNoisePreference } from "./signalNoise";
 import {
   type Extractor,
   type ExtractorDeps,
   pickExtractor,
+  refineProfileContentWithLLM,
 } from "./extraction";
 import { makeBlankProfile, newPreferenceId, storage } from "./storage";
 import {
@@ -29,6 +26,81 @@ import {
   type SignalSource,
   type SnapshotChange,
 } from "./types";
+
+/** Weighted reinforcement per signal source. Measures evidence quality, not
+ *  just volume. Profile edits are the strongest signal; repeated requests
+ *  add marginal weight. */
+export const REINFORCEMENT_WEIGHT: Record<SignalSource, number> = {
+  "explicit-feedback": 1.0,
+  "user-modification": 5.0, // direct edit to profile.md
+  "rejected-change": 2.0,   // explicit correction
+  "accepted-change": 1.0,
+  "architecture-decision": 1.0,
+  "design-critique": 1.0,
+  "workflow-instruction": 1.0,
+  "config-setting": 0.5,
+  "recurring-request": 0.25, // low-weight, just repetition
+};
+
+function computeReinforcement(signals: ReadonlyArray<Signal>): number {
+  let total = 0;
+  for (const s of signals) {
+    total += REINFORCEMENT_WEIGHT[s.source] ?? 0.5;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/** Stable identity for dedup across rephrasings. */
+export function canonicalRuleId(category: string, preference: string): string {
+  const slug = preference
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 64);
+  return `${normalizeDomain(category)}_${slug}`;
+}
+
+/** Caps self-scored LLM precision using simple structural heuristics.
+ *  The LLM judges its own output — this provides a lightweight sanity check
+ *  against overconfident vague statements. */
+export function validatePrecision(pref: string, claimedPrecision: number): number {
+  // Vague, non-actionable words suggest low precision regardless of LLM claim.
+  const vagueWords = /\b(clean|good|better|best practice|proper|appropriate|scalable|robust|efficient|optimized?)\b/i;
+  const vagueCount = (pref.match(vagueWords) ?? []).length;
+
+  // Proper nouns: at least one capitalized technical term that isn't just
+  // the first word of the sentence. Matches "Tailwind CSS", "SwiftUI",
+  // "React Compiler", "NSMenu", etc.
+  const properNounPattern = /[a-z]\s+[A-Z][a-zA-Z]+|[A-Z][a-z]+[A-Z][a-z]+|[A-Z]{2,}|[A-Z][a-z]+\s+[A-Z]/;
+  const hasProperNoun = properNounPattern.test(pref);
+
+  // Concrete terminology + action verbs suggest genuine precision.
+  const concreteTerms = /\b(use|prefer|avoid|never|always|must|should)\b.{10,}(framework|api|pattern|method|function|component|hook|library|tool|command|flag|option|config|type|interface|class|module|service|endpoint|query|mutation|state|prop|attribute|directive|decorator|middleware|route|handler|controller|model|schema|migration|transaction|index|constraint|trigger|event|stream|pipe|buffer|timeout|retry|cache|batch|queue|worker|job|task|pipeline|workflow)\b/i;
+  const hasConcrete = concreteTerms.test(pref) || hasProperNoun;
+
+  // Structural quality signals
+  const wordCount = pref.split(/\s+/).length;
+  const hasAlternative = /\b(instead|rather than|avoid|prefer|over\b.*\buse\b)/i.test(pref);
+  const hasCondition = /\b(when|if|unless|only if|except|during)\b/i.test(pref);
+
+  let score = claimedPrecision;
+
+  // Penalize vagueness
+  if (vagueCount >= 3) score = Math.min(score, 0.4);
+  else if (vagueCount >= 1) score = Math.min(score, 0.65);
+
+  // Short statements without concrete terms or proper nouns are likely imprecise
+  if (wordCount < 8 && !hasConcrete) score = Math.min(score, 0.5);
+  else if (wordCount < 15 && !hasConcrete) score = Math.min(score, 0.6);
+
+  // Structural bonuses
+  if (hasConcrete) score = Math.min(score + 0.03, 0.98);
+  if (hasAlternative) score = Math.min(score + 0.02, 0.98);
+  if (hasCondition) score = Math.min(score + 0.02, 0.98);
+
+  return Math.round(Math.max(0, Math.min(1, score)) * 100) / 100;
+}
 
 export type RefineOptions = {
   scope: Scope;
@@ -64,7 +136,11 @@ export async function refineProfile(
   const now = options.now ?? Date.now();
   const config = deps.getConfig();
   let previous = await storage.getProfile(options.scope, options.projectRoot);
-  const signals = await storage.loadSignals(options.scope, options.projectRoot);
+  const rawSignals = await storage.loadSignals(
+    options.scope,
+    options.projectRoot,
+  );
+  const signals = rawSignals.filter((s) => !isNoisePreference(s.preference));
 
   // Defensive filter: if this profile somehow accumulated preferences that are
   // obviously about a completely different project (historical resolution bugs),
@@ -101,11 +177,14 @@ export async function refineProfile(
     });
   } catch (err) {
     console.warn(
-      "[engineering-profile] LLM extraction failed (no local fallback; priors will decay, signals re-presented to LLM on next refine):",
-      err,
+      "[engineering-profile] LLM extraction failed:",
+      (err as Error)?.message ?? err,
     );
     extraction = { candidates: [], discarded: [], provider: config?.provider };
   }
+
+  // Consolidation is LLM-only. When extraction returns nothing, carry forward
+  // existing priors (minus structural noise) rather than transcribing raw signals.
 
   const next = previous
     ? cloneProfile(previous, now)
@@ -163,6 +242,10 @@ export async function refineProfile(
       cand.mergedPriorIds.includes(p.id),
     );
 
+    // Validate LLM precision through lightweight structural heuristics
+    // so self-scoring doesn't produce overconfident vague rules.
+    const validatedPrecision = validatePrecision(cand.preference, cand.precision);
+
     if (existingPref) {
       existingPref.signalIds = Array.from(
         new Set([...existingPref.signalIds, ...mergedSignalIds]),
@@ -173,23 +256,23 @@ export async function refineProfile(
           ...collectSources(allEvidenceForIntent),
         ]),
       );
-      const rawScore = aggregateScore(allEvidenceForIntent, now, config);
-      let confidence =
-        allEvidenceForIntent.length > 0
-          ? normalizeConfidence(rawScore, allEvidenceForIntent)
-          : primaryPrior
-            ? primaryPrior.confidence
-            : existingPref.confidence;
-      if (primaryPrior?.pinned) {
-        confidence = Math.max(primaryPrior.confidence, confidence);
+      // Bidirectional precision: blend old and new interpretation.
+      // A new weaker interpretation can pull confidence down, preventing
+      // overconfidence from a single early strong reading.
+      existingPref.confidence = Math.round(
+        (existingPref.confidence * 0.3 + validatedPrecision * 0.7) * 100,
+      ) / 100;
+      // When the new interpretation meaningfully improves phrasing, adopt it.
+      if (validatedPrecision > existingPref.confidence) {
+        existingPref.preference = cand.preference;
+        existingPref.canonicalRuleId = canonicalRuleId(cand.category, cand.preference);
       }
-      existingPref.confidence = anchorConfidence(
-        confidence,
-        existingPref.signalIds,
-        signals,
-        config,
-        existingPref.pinned,
-      );
+      if (primaryPrior?.pinned) {
+        existingPref.confidence = Math.max(primaryPrior.confidence, existingPref.confidence);
+        existingPref.pinned = true;
+      }
+      // Weighted reinforcement — quality-weighted, not just count.
+      existingPref.reinforcement = computeReinforcement(allEvidenceForIntent);
       existingPref.evidenceCount = allEvidenceForIntent.length;
       if (allEvidenceForIntent.length > 0) {
         existingPref.lastObservedAt = Math.max(
@@ -201,27 +284,17 @@ export async function refineProfile(
           ...allEvidenceForIntent.map((s) => s.timestamp),
         );
       }
-      if (primaryPrior?.pinned) {
-        existingPref.pinned = true;
-      }
       for (const p of priors) {
         processedPriorIds.add(p.id);
       }
       continue;
     }
 
-    const rawScore = aggregateScore(allEvidenceForIntent, now, config);
-    let confidence =
-      allEvidenceForIntent.length > 0
-        ? normalizeConfidence(rawScore, allEvidenceForIntent)
-        : primaryPrior
-          ? primaryPrior.confidence
-          : 0;
-
+    // New preference: validated precision + weighted reinforcement + canonical id.
+    let confidence = validatedPrecision;
     if (primaryPrior?.pinned) {
       confidence = Math.max(primaryPrior.confidence, confidence);
     }
-    // No local normalizeText comparison / averaging. LLM chose the phrasing; confidence comes from full evidence.
 
     const firstObserved =
       allEvidenceForIntent.length > 0
@@ -234,15 +307,13 @@ export async function refineProfile(
 
     const pref: Preference = {
       id: primaryPrior?.id ?? newPreferenceId(),
+      canonicalRuleId:
+        primaryPrior?.canonicalRuleId ??
+        canonicalRuleId(cand.category, cand.preference),
       category: cand.category as Domain,
       preference: cand.preference,
-      confidence: anchorConfidence(
-        confidence,
-        mergedSignalIds,
-        signals,
-        config,
-        primaryPrior?.pinned ?? false,
-      ),
+      confidence,
+      reinforcement: computeReinforcement(allEvidenceForIntent),
       evidenceCount: mergedSignalIds.length,
       firstObservedAt: primaryPrior
         ? Math.min(primaryPrior.firstObservedAt, firstObserved)
@@ -265,26 +336,12 @@ export async function refineProfile(
     }
   }
 
-  // 4. Decay unmapped priors
+  // 4. Carry forward unmapped priors — confidence (interpretation precision)
+  //    doesn't decay. Reinforcement and evidence counts are preserved as-is.
   for (const prior of uniquePriors) {
     if (processedPriorIds.has(prior.id)) continue;
-    let confidence = prior.confidence;
-    if (!prior.pinned) {
-      const halfLife = Math.max(config.decayHalfLifeMs, 1);
-      const age = Math.max(0, now - prior.lastObservedAt);
-      const decay = 0.5 ** (age / halfLife);
-      confidence = prior.confidence * decay;
-    }
-    nextPrefs.push({
-      ...prior,
-      confidence: anchorConfidence(
-        confidence,
-        prior.signalIds,
-        signals,
-        config,
-        prior.pinned,
-      ),
-    });
+    if (isNoisePreference(prior.preference)) continue;
+    nextPrefs.push({ ...prior });
   }
 
   const demoted = nextPrefs.filter(
@@ -293,27 +350,71 @@ export async function refineProfile(
   const kept = nextPrefs.filter(
     (p) => p.confidence >= config.demotionThreshold || p.pinned,
   );
-  kept.sort((a, b) => b.confidence - a.confidence);
+  // Sort by confidence (precision) descending, then by reinforcement for equal precision
+  kept.sort((a, b) => {
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+    return (b.reinforcement ?? 0) - (a.reinforcement ?? 0);
+  });
   const top = kept.slice(0, config.maxPreferences);
   const dropped: Preference[] = [
     ...demoted,
     ...kept.slice(config.maxPreferences),
   ];
-  top.sort((a, b) => {
-    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-    return b.lastObservedAt - a.lastObservedAt;
-  });
+
+  // ── LLM profile refinement pass ──────────────────────────────────
+  // After candidate merge, ask the LLM to review the assembled profile
+  // for semantic duplicates (clean code = clear code), non-English
+  // leakage, and vague rules that survived extraction.
+  const { dropIds, mergeMap, updated } = await refineProfileContentWithLLM(
+    top.map((p) => ({
+      id: p.id,
+      category: p.category,
+      preference: p.preference,
+      confidence: p.confidence,
+      pinned: p.pinned,
+    })),
+    deps,
+  );
+
+  // Apply LLM-requested drops and merges
+  const refinedTop = top.filter((p) => !dropIds.has(p.id));
+  for (const [sourceId, survivorId] of mergeMap) {
+    const sourceIdx = refinedTop.findIndex((p) => p.id === sourceId);
+    const survivor = refinedTop.find((p) => p.id === survivorId);
+    if (sourceIdx >= 0 && survivor) {
+      // Merge signal IDs from source into survivor
+      const source = refinedTop[sourceIdx]!;
+      survivor.signalIds = Array.from(
+        new Set([...survivor.signalIds, ...source.signalIds]),
+      );
+      survivor.supportingSources = Array.from(
+        new Set([...survivor.supportingSources, ...source.supportingSources]),
+      );
+      survivor.evidenceCount += source.evidenceCount;
+      dropped.push(source);
+      refinedTop.splice(sourceIdx, 1);
+    }
+  }
+  // Apply LLM-updated preference text and confidence
+  for (const [id, update] of updated) {
+    const pref = refinedTop.find((p) => p.id === id);
+    if (pref && !pref.pinned) {
+      pref.preference = update.preference;
+      pref.confidence = update.confidence;
+      pref.canonicalRuleId = canonicalRuleId(pref.category, update.preference);
+    }
+  }
 
   const nextProfile: Profile = {
     ...next,
     generatedAt: now,
-    preferences: top,
+    preferences: refinedTop,
     summary: next.summary,
-    domains: buildDomainProfiles(top, next.summary, now, config, next.domains),
+    domains: buildDomainProfiles(refinedTop, next.summary, now, config, next.domains),
   };
-  nextProfile.summary = nextProfile.summary || generateSummary(top, config);
+  nextProfile.summary = nextProfile.summary || generateSummary(refinedTop, config);
 
-  const changes = diffChanges(previous?.preferences ?? [], top);
+  const changes = diffChanges(previous?.preferences ?? [], refinedTop);
   const snapshot: ProfileSnapshot = {
     id: `snap-${now.toString(36)}`,
     scope: options.scope,
@@ -325,8 +426,17 @@ export async function refineProfile(
     note: options.note ?? null,
   };
 
-  await storage.saveProfile(nextProfile);
-  await storage.appendSnapshot(snapshot);
+  try {
+    await storage.saveProfile(nextProfile);
+    await storage.appendSnapshot(snapshot);
+  } catch (err) {
+    console.error(
+      "[engineering-profile] storage write failed during refinement:",
+      err,
+    );
+    // Continue — the refinement results are still valid even if persistence
+    // had a transient issue. The next refinement pass will retry.
+  }
 
   return {
     profile: nextProfile,
@@ -635,6 +745,7 @@ export function buildFallbackCandidates(
     out.push({
       category: first.category,
       preference: first.preference,
+      precision: 0.4, // deterministic fallback: moderate uncertainty, no LLM interpretation
       evidence: first.evidence,
       weight: 1,
       mergedPriorIds: prior ? [prior.id] : [],
@@ -644,18 +755,4 @@ export function buildFallbackCandidates(
   return out;
 }
 
-function anchorConfidence(
-  confidence: number,
-  signalIds: ReadonlyArray<string>,
-  allSignals: ReadonlyArray<Signal>,
-  config: RefinementConfig,
-  pinned: boolean,
-): number {
-  const evidence = allSignals.filter((s) => signalIds.includes(s.id));
-  return applyKlAnchor(confidence, evidence, config, pinned);
-}
-
-export const _internal = {
-  clamp01,
-  distinctSourceCount,
-};
+export const _internal = {};

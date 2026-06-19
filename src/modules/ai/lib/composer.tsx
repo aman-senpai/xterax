@@ -1,4 +1,4 @@
-import { observeUserMessage } from "@/modules/engineering-profile/observer";
+
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
@@ -308,23 +308,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
       void chat.sendMessage({ role: "user", parts } as Parameters<
         typeof chat.sendMessage
       >[0]);
-
-      // Resolve to the proper (git-root) project for this context so that
-      // preference signals and refinement target the .xterax of the project
-      // the user is actually editing, not a stale launch dir.
-      const { resolveProfileProjectRoot } = await import(
-        "@/modules/engineering-profile/projectRoot"
-      );
-      const ctx = store.live.getProjectRoot();
-      const profileRoot = await resolveProfileProjectRoot(ctx);
-
-      observeSubmittedMessage(effectiveText, profileRoot);
-
-      void import("@/modules/engineering-profile/learningAgent").then(
-        ({ notifyUserMessageSent }) => {
-          notifyUserMessageSent(profileRoot);
-        },
-      );
     })();
     setValue("");
     setFiles([]);
@@ -404,25 +387,4 @@ function readAsDataURL(file: Blob): Promise<string> {
   });
 }
 
-/**
- * Runs the passive observer against the user's submitted message. Records
- * any explicit preference patterns ("I prefer X", "always use Y", "stop
- * using Z"). Refinement is handled by the learning agent after the turn.
- *
- * Fire-and-forget. The user sees no UI change; the .xterax/profile.md
- * file gets updated on the next refinement tick.
- */
-async function observeSubmittedMessage(
-  text: string,
-  projectRoot: string | null,
-): Promise<void> {
-  if (!text || text.trim().length < 4) return;
-  try {
-    await observeUserMessage({
-      text,
-      projectRoot,
-    });
-  } catch (err) {
-    console.warn("[engineering-profile] observation failed:", err);
-  }
-}
+

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyTask } from "./runtime";
+import { classifyTask, isSkeletonProfileMd } from "./runtime";
 
 describe("classifyTask", () => {
   it("classifies frontend tasks", () => {
@@ -37,5 +37,41 @@ describe("classifyTask", () => {
     );
     expect(domains.length).toBeLessThanOrEqual(4);
     expect(domains).toContain("testing");
+  });
+});
+
+describe("isSkeletonProfileMd", () => {
+  it("treats heading-only bootstrap file as skeleton", () => {
+    expect(isSkeletonProfileMd("# Profile\n")).toBe(true);
+  });
+
+  it("treats legacy Project line bootstrap as skeleton", () => {
+    expect(
+      isSkeletonProfileMd("# Profile\n\nProject: `/Users/foo/terax-ai`\n"),
+    ).toBe(true);
+  });
+
+  it("treats boilerplate-only refined file as skeleton", () => {
+    expect(
+      isSkeletonProfileMd(
+        "# Profile\n\nThis is the project's living profile.\nIt is updated autonomously from signals.\n",
+      ),
+    ).toBe(true);
+  });
+
+  it("treats files with preference bullets as real content", () => {
+    expect(
+      isSkeletonProfileMd(
+        "# Profile\n\n# general\n\n- Prefer clean code. Confidence: 0.72\n",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats split-reference bullets as real content", () => {
+    expect(
+      isSkeletonProfileMd(
+        "# Profile\n\n# frontend\n\n- See .xterax/frontend/profile.md\n",
+      ),
+    ).toBe(false);
   });
 });

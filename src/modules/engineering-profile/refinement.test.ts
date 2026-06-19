@@ -40,6 +40,7 @@ vi.mock("./extraction", async (importOriginal) => {
 function pref(over: Partial<Preference>): Preference {
   return {
     id: over.id ?? "p1",
+    canonicalRuleId: over.canonicalRuleId ?? `${over.category ?? "frontend"}_prefer-typescript`,
     category: over.category ?? "frontend",
     preference: over.preference ?? "Prefer TypeScript",
     confidence: over.confidence ?? 0.7,
@@ -50,6 +51,7 @@ function pref(over: Partial<Preference>): Preference {
     supportingSources: over.supportingSources ?? [],
     scope: over.scope ?? "user",
     projectRoot: over.projectRoot ?? null,
+    reinforcement: over.reinforcement ?? 1,
     pinned: over.pinned ?? false,
     supersededBy: over.supersededBy ?? null,
   };
@@ -182,6 +184,82 @@ describe("mergeProfiles", () => {
   });
 });
 
+describe("refineProfile — noise filtering", () => {
+  it("drops meta-noise signals and does not carry noise priors when LLM returns nothing", async () => {
+    const { refineProfile } = await import("./refinement");
+    const { storage } = await import("./storage");
+    const { pickExtractor } = await import("./extraction");
+
+    const now = Date.now();
+    vi.mocked(storage.getProfile).mockResolvedValueOnce({
+      id: "p1",
+      scope: "project",
+      projectRoot: "/test",
+      generatedAt: now,
+      summary: "",
+      preferences: [
+        pref({
+          id: "noise1",
+          preference:
+            "User edited /test/.xterax: user edited file",
+          category: "general",
+        }),
+        pref({
+          id: "keep1",
+          preference: "Always use TypeScript for new modules",
+          category: "frontend",
+          confidence: 0.8,
+        }),
+      ],
+      domains: {},
+    });
+    vi.mocked(storage.loadSignals).mockResolvedValueOnce([
+      {
+        id: "s-noise",
+        timestamp: now,
+        source: "explicit-feedback",
+        scope: "project",
+        projectRoot: "/test",
+        category: "general",
+        preference: "User edited /test/.xterax: user edited file",
+        evidence: "fs",
+        weight: 1,
+      },
+    ]);
+
+    const mockExtractor = vi.fn().mockResolvedValue({
+      candidates: [],
+      discarded: [],
+      provider: "openai",
+    });
+    vi.mocked(pickExtractor).mockReturnValueOnce(mockExtractor);
+
+    const deps = {
+      getKeys: () => ({}),
+      getConfig: () => ({
+        provider: "openai",
+        modelId: "gpt-5",
+        minConfidence: 0.3,
+        maxAgeMs: 100000,
+        decayHalfLifeMs: 1000000,
+        promotionThreshold: 0.7,
+        demotionThreshold: 0.2,
+        maxPreferences: 10,
+        splitMinPreferences: 5,
+        splitMinAverageConfidence: 0.6,
+        splitMinShare: 0.2,
+      }),
+    };
+
+    const res = await refineProfile(deps as any, {
+      scope: "project",
+      projectRoot: "/test",
+    });
+    expect(res.profile.preferences).toHaveLength(1);
+    expect(res.profile.preferences[0]?.id).toBe("keep1");
+  });
+});
+
 describe("buildFallbackCandidates", () => {
   function sig(over: Partial<Signal>): Signal {
     return {
@@ -259,9 +337,7 @@ describe("refineProfile", () => {
       scope: "project",
       projectRoot: "/test",
     });
-    // Pure LLM path: empty candidates from extractor means no new prefs invented locally from raw signals.
-    // Signals stay in the log; a future successful LLM extraction will see them + any priors and must consolidate.
-    // We still produce a (empty) profile so writes/snapshots can occur.
+    // Consolidation is LLM-only; no deterministic transcription fallback.
     expect(res.profile.preferences.length).toBe(0);
   });
   it("merges prior preferences when instructed by the LLM mergedPriorIds", async () => {
@@ -317,6 +393,7 @@ describe("refineProfile", () => {
         {
           category: "frontend",
           preference: "Prefer Tailwind CSS for styling",
+          precision: 0.85,
           evidence: "consolidated style preference",
           weight: 1.0,
           mergedPriorIds: ["1", "2"],
@@ -336,12 +413,14 @@ describe("refineProfile", () => {
     });
     expect(res.profile.preferences).toHaveLength(1);
     expect(res.profile.preferences[0]?.id).toBe("1");
+    // confidence = validated precision (may be adjusted by structural heuristics)
+    expect(res.profile.preferences[0]?.confidence).toBeCloseTo(0.90, 1);
     expect(res.profile.preferences[0]?.preference).toBe(
       "Prefer Tailwind CSS for styling",
     );
   });
 
-  it("decays unmapped priors but keeps pinned priors unchanged", async () => {
+  it("carries forward unmapped priors with unchanged confidence", async () => {
     const { refineProfile } = await import("./refinement");
     const { storage } = await import("./storage");
     const now = Date.now();
@@ -395,11 +474,13 @@ describe("refineProfile", () => {
       projectRoot: "/test",
       now,
     });
-    const decayed = res.profile.preferences.find((p) => p.id === "1");
-    const pinned = res.profile.preferences.find((p) => p.id === "2");
+    const pref1 = res.profile.preferences.find((p) => p.id === "1");
+    const pref2 = res.profile.preferences.find((p) => p.id === "2");
 
-    expect(decayed?.confidence).toBeCloseTo(0.4, 3);
-    expect(pinned?.confidence).toBe(0.9);
+    // Confidence (interpretation precision) no longer decays over time.
+    // Precision is a property of the LLM's understanding, not signal age.
+    expect(pref1?.confidence).toBe(0.8);
+    expect(pref2?.confidence).toBe(0.9);
   });
 
   it("respects LLM mergedPriorIds mapping", async () => {
@@ -456,6 +537,7 @@ describe("refineProfile", () => {
         {
           category: "frontend",
           preference: "Older preference version 2",
+          precision: 0.9,
           evidence: "changed in code",
           weight: 1.0,
           mergedPriorIds: ["prior-id"],

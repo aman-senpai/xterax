@@ -34,8 +34,8 @@
  *
  * Refinement (the LLM extractor + merge/consolidation step, i.e. the
  * costly part) is **only** driven by new user-sent chat messages:
- *   - `notifyUserMessageSent()` — called from the composer when the user
- *     submits a message. This is the single controlled entry point.
+ *   - `notifyUserMessageSent()` — called from the chat transport after
+ *     LLM intent observation completes. This is the single controlled entry point.
  *     Any accumulated signals (from observer, agent tool calls during
  *     the turn, feedback, rejections, etc.) are processed then.
  *
@@ -63,6 +63,7 @@ import {
   makeExtractorDeps,
 } from "./autoRefine";
 import { getAnchoredProjectRoot } from "./projectRoot";
+import { isXteraxProfilePath } from "./signalNoise";
 
 const MIN_REFINEMENT_INTERVAL_MS = 4000;
 const IDLE_INTERVAL_MS = 90_000;
@@ -118,6 +119,10 @@ function emit(): void {
 function setState(patch: Partial<AgentState>): void {
   Object.assign(state, patch);
   emit();
+}
+
+function setIdle(summary: string, patch: Partial<AgentState> = {}): void {
+  setState({ status: "idle", lastError: null, lastSummary: summary, ...patch });
 }
 
 export function startLearningAgent(root: string | null): void {
@@ -293,11 +298,8 @@ export function notifyUserMessageSent(projectRootOverride?: string | null): void
   void maybeRefine("user-message");
 }
 
-export function notifyUserFileEdit(filePath: string, summary: string): void {
-  const isProfileFile =
-    filePath.endsWith("/.xterax/profile.md") ||
-    filePath.includes("/.xterax/");  // catch any file inside .xterax/ (root + domain split profiles) for self-write guards
-  if (isProfileFile) {
+export function notifyUserFileEdit(filePath: string, _summary: string): void {
+  if (isXteraxProfilePath(filePath)) {
     if (projectRoot) {
       void import("./storage").then(async (m) => {
         // Guard against our own writes...
@@ -310,11 +312,12 @@ export function notifyUserFileEdit(filePath: string, summary: string): void {
     }
     return;
   }
-  const text = `User edited ${filePath}: ${summary}`;
-  void observeUserMessage({ text, projectRoot });
-  // We no longer immediately call maybeRefine here. observe may record a
-  // preference signal if the edit text matches patterns. The refinement
-  // (LLM pass) will be triggered on the next user-sent chat message.
+  // Non-.xterax file edits: the fs-watcher event is informational only.
+  // Previously we constructed "User edited <path>: <summary>" and passed it
+  // to observeUserMessage, but that synthetic text was always rejected by
+  // the isSyntheticObservationMessage guard — dead code on every edit.
+  // Real preference detection happens via the observer on user chat messages
+  // and via explicit signal recording from agent tool calls.
 }
 
 async function idleTick(): Promise<void> {
@@ -365,27 +368,34 @@ async function maybeRefine(
 async function runRefinePass(trigger: string): Promise<void> {
   const scopes = await scopesNeedingRefine();
   if (scopes.length === 0) {
-    setState({ status: "idle", lastSummary: "No pending signals to refine" });
+    setIdle("No pending signals to refine");
     return;
   }
   const projectScope = scopes.find((s) => s.scope === "project");
   if (projectScope?.projectRoot) {
     const { isBootstrapped } = await import("./bootstrap");
     if (!(await isBootstrapped(projectScope.projectRoot))) {
-      setState({ status: "idle", lastSummary: "Project not bootstrapped yet" });
+      setIdle("Project not bootstrapped yet");
       return;
     }
   }
   const lockScope: Scope = projectScope ? "project" : "user";
   const lockRoot = projectScope?.projectRoot ?? null;
   if (!acquireRefineLock(lockScope, lockRoot)) return;
-  setState({ status: "observing", lastSummary: `Triggered by ${trigger}` });
+  // Counter reflects queued work; clear it once a pass actually starts.
+  state.signalsSinceLastRefine = 0;
+  setState({
+    status: "observing",
+    lastSummary: `Triggered by ${trigger}`,
+    lastError: null,
+  });
   const t0 = Date.now();
   const job = (async () => {
     const deps = makeExtractorDeps();
     setState({
       status: "refining",
       lastSummary: "Refining profile (LLM pass)",
+      lastError: null,
     });
     const results: RefineResult[] = [];
     for (const target of scopes) {
@@ -399,7 +409,6 @@ async function runRefinePass(trigger: string): Promise<void> {
     }
     const last = results[results.length - 1]!;
     setState({ status: "writing", lastSummary: "Writing profile.md" });
-    state.signalsSinceLastRefine = 0;
     state.lastRefineAt = Date.now();
     state.totalRefinements++;
     setState({
@@ -413,6 +422,7 @@ async function runRefinePass(trigger: string): Promise<void> {
     await job;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    console.error("[engineering-profile] refinement crashed:", err);
     setState({ status: "error", lastError: msg, lastSummary: `Error: ${msg}` });
   }
 }

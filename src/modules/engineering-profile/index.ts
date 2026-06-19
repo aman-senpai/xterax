@@ -18,7 +18,11 @@ export {
   showProfileHistory,
   showSignals,
 } from "./api";
-export { bootstrapPath, ensureBootstrap } from "./bootstrap";
+export {
+  bootstrapPath,
+  ensureBootstrap,
+  resetProjectStoreIfMirrorMissing,
+} from "./bootstrap";
 export {
   aggregateScore,
   clamp01,
@@ -31,7 +35,7 @@ export {
   totalWeight,
 } from "./confidence";
 export type { Extractor, ExtractorDeps } from "./extraction";
-export { llmExtractor, pickExtractor } from "./extraction";
+export { llmExtractor, pickExtractor, supportsProvider } from "./extraction";
 export type { AgentState } from "./learningAgent";
 export {
   forceRefine,

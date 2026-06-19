@@ -7,6 +7,7 @@ function pref(
 ): Preference {
   return {
     id: over.id ?? `p-${Math.random().toString(36).slice(2)}`,
+    canonicalRuleId: over.canonicalRuleId ?? `${over.category}_prefer-x`,
     category: over.category,
     preference: over.preference ?? "Prefer X",
     confidence: over.confidence ?? 0.7,
@@ -17,6 +18,7 @@ function pref(
     supportingSources: over.supportingSources ?? [],
     scope: over.scope ?? "user",
     projectRoot: over.projectRoot ?? null,
+    reinforcement: over.reinforcement ?? 1,
     pinned: over.pinned ?? false,
     supersededBy: over.supersededBy ?? null,
   };

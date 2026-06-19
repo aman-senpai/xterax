@@ -5,6 +5,8 @@ import {
   type Signal,
   type SignalSource,
 } from "./types";
+import { preferenceKey } from "./confidence";
+import { isNoisePreference } from "./signalNoise";
 import { newSignalId, storage, projectMirrorExists, clearProjectData } from "./storage";
 import { ensureBootstrap } from "./bootstrap";
 
@@ -25,15 +27,9 @@ export type RecordSignalResult = {
   reason?: string;
 };
 
-const NOISE_PATTERNS: RegExp[] = [
-  /^\s*$/,
-  /^(ok|okay|sure|thanks|thx|ty|got it|done|nice|lgtm|yep|yeah|no|nope|k)\s*\.?$/i,
-  /^please (do|run|execute|try)/i,
-  /^(can you|could you|would you|will you)/i,
-];
-
 const PREFERENCE_TOO_SHORT = 3;
 const PREFERENCE_MAX_LEN = 280;
+const SIGNAL_DEDUP_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Records a single preference signal. The signal is append-only — never
@@ -57,19 +53,28 @@ export async function recordSignal(
   if (text.length > PREFERENCE_MAX_LEN) {
     return { accepted: false, reason: "too-long", signal: emptySignal() };
   }
-  for (const re of NOISE_PATTERNS) {
-    if (re.test(text)) {
-      return { accepted: false, reason: "noise", signal: emptySignal() };
-    }
+  if (isNoisePreference(text)) {
+    return { accepted: false, reason: "noise", signal: emptySignal() };
   }
   const category: Domain = isDomain(input.category)
     ? input.category
     : "general";
   const scope: Scope = input.scope ?? (input.projectRoot ? "project" : "user");
   const projectRoot = scope === "project" ? (input.projectRoot ?? null) : null;
+  const now = input.timestamp ?? Date.now();
+  const key = preferenceKey(category, text);
+  const existing = await storage.loadSignals(scope, projectRoot);
+  const duplicate = existing.find(
+    (s) =>
+      preferenceKey(s.category, s.preference) === key &&
+      now - s.timestamp < SIGNAL_DEDUP_WINDOW_MS,
+  );
+  if (duplicate) {
+    return { signal: duplicate, accepted: false, reason: "duplicate" };
+  }
   const signal: Signal = {
     id: newSignalId(),
-    timestamp: input.timestamp ?? Date.now(),
+    timestamp: now,
     source: input.source,
     scope,
     projectRoot,

@@ -105,7 +105,7 @@ export async function loadProfileArtifacts(
   }
   const rootMdPath = `${workspaceRoot.replace(/\/$/, "")}/.xterax/profile.md`;
   const rootBody = await readTextFile(rootMdPath);
-  if (rootBody === null) {
+  if (rootBody === null || isSkeletonProfileMd(rootBody)) {
     return {
       rootBody: "",
       includedSplits: [],
@@ -333,6 +333,29 @@ function estimateTokens(text: string): number {
 
 function formatConfidence(c: number): string {
   return `${(c * 100).toFixed(0)}%`;
+}
+
+/**
+ * Returns true if the on-disk profile.md is the initial skeleton created by
+ * ensureBootstrap (only a heading, no real preferences yet). We treat this
+ * the same as "no profile file" to avoid injecting empty/polluting context
+ * into every chat before any learning has occurred.
+ */
+export function isSkeletonProfileMd(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return true;
+  // Matches "# Profile" (with optional following whitespace or nothing).
+  // We do not treat it as real content until actual bullets or sections appear.
+  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return true;
+  if (lines.length === 1 && /^#+\s*profile$/i.test(lines[0])) return true;
+  // If it starts with # Profile and has no preference-like bullets, consider skeleton.
+  if (/^#+\s*profile$/i.test(lines[0])) {
+    const rest = lines.slice(1);
+    const hasBullet = rest.some((l) => l.startsWith("- ") || l.startsWith("* "));
+    if (!hasBullet) return true;
+  }
+  return false;
 }
 
 export { similarity };

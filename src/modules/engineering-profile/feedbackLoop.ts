@@ -72,9 +72,8 @@ export type AlignmentScore = {
  * preference and classifies it as honored, violated, or neutral
  * relative to the agent's actual output.
  *
- * The classification is heuristic — we don't run an LLM here. The
- * intent is fast, deterministic, and good enough to drive a feedback
- * signal. The full LLM-based alignment check is the next iteration.
+ * Classification uses broadened keyword/phrase overlap (no longer a
+ * tiny hardcoded list) for broad coverage of learned prefs.
  */
 export function scoreAlignment(
   turn: TurnSnapshot,
@@ -124,53 +123,39 @@ function isNegativePref(prefNorm: string): boolean {
 }
 
 /**
- * Extracts a short, searchable keyword for the preference. Looks for
- * language-specific tokens first (TypeScript, Vitest, server
- * components, ...). Falls back to a single token.
+ * Extracts a searchable token from the pref text. Uses distinctive
+ * words (skipping common verbs) so alignment works for any learned
+ * preference text.
  */
 function keywordFor(prefNorm: string): string | null {
-  const candidates = [
-    "typescript",
-    "javascript",
-    "python",
-    "rust",
-    "go",
-    "swift",
-    "elixir",
-    "phoenix",
-    "server components",
-    "client components",
-    "redux",
-    "vitest",
-    "jest",
-    "playwright",
-    "tailwind",
-    "feature-based",
-    "monorepo",
-    "hexagonal",
-    "ddd",
-    "cqrs",
-    "postgres",
-    "postgresql",
-    "mysql",
-    "sqlite",
-    "redis",
-    "graphql",
-    "grpc",
-    "rest",
-    "docker",
-    "kubernetes",
-    "comments",
-    "feature flags",
-    "prettier",
-    "eslint",
-    "biome",
-  ];
-  for (const c of candidates) {
-    if (prefNorm.includes(c)) return c;
-  }
-  const m = prefNorm.match(/\b([a-z][a-z0-9.+#-]{2,})\b/);
-  return m?.[1] ?? null;
+  const STOP = new Set([
+    "use",
+    "prefer",
+    "always",
+    "never",
+    "stop",
+    "avoid",
+    "don't",
+    "do",
+    "not",
+    "for",
+    "the",
+    "and",
+    "with",
+    "new",
+    "in",
+    "on",
+    "to",
+    "of",
+    "a",
+    "an",
+  ]);
+  const tokens = (prefNorm.match(/\b([a-z][a-z0-9.+#-]{3,})\b/g) || []).filter(
+    (t) => !STOP.has(t),
+  );
+  if (tokens.length === 0) return null;
+  // longest distinctive first
+  return tokens.sort((a, b) => b.length - a.length)[0];
 }
 
 function keywordPresent(

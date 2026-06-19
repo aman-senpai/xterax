@@ -28,6 +28,7 @@ import type { Preference, Profile } from "./types";
 function pref(over: Partial<Preference>): Preference {
   return {
     id: over.id ?? "p1",
+    canonicalRuleId: over.canonicalRuleId ?? `${over.category ?? "frontend"}_prefer-typescript`,
     category: over.category ?? "frontend",
     preference: over.preference ?? "Prefer TypeScript",
     confidence: over.confidence ?? 0.7,
@@ -38,6 +39,7 @@ function pref(over: Partial<Preference>): Preference {
     supportingSources: over.supportingSources ?? [],
     scope: over.scope ?? "user",
     projectRoot: over.projectRoot ?? null,
+    reinforcement: over.reinforcement ?? 1,
     pinned: over.pinned ?? false,
     supersededBy: over.supersededBy ?? null,
   };

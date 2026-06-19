@@ -67,6 +67,8 @@ import {
   setProfileModelId,
   setProfileThinkingLevel,
 } from "@/modules/settings/store";
+import type { RefinementProvider } from "@/modules/engineering-profile/types";
+import { supportsProvider } from "@/modules/engineering-profile/types";
 import {
   Add01Icon,
   ArrowDown01Icon,
@@ -1061,11 +1063,23 @@ function ProfileModelRow({
   const thinkingLevel = usePreferencesStore((s) => s.profileThinkingLevel);
 
   const items = useMemo(() => {
-    return MODELS.filter((m) => configuredIds.has(m.provider));
+    return MODELS.filter(
+      (m) =>
+        configuredIds.has(m.provider) &&
+        supportsProvider(m.provider as any),
+    );
   }, [configuredIds]);
+
+  const chatModelId = useChatStore((s) => s.selectedModelId);
 
   const currentModel = useMemo(() => {
     const fallback = items[0] ?? MODELS[0];
+    if (!modelId?.trim()) {
+      const chatModel =
+        MODELS.find((m) => m.id === chatModelId) ??
+        MODELS.find((m) => m.id === chatModelId.split(":").pop());
+      if (chatModel && configuredIds.has(chatModel.provider)) return chatModel;
+    }
     if (isLocalProvider(provider as ProviderId)) {
       return MODELS.find((m) => m.provider === provider) ?? fallback;
     }
@@ -1074,10 +1088,10 @@ function ProfileModelRow({
       MODELS.find((m) => m.id === modelId) ??
       fallback
     );
-  }, [items, provider, modelId]);
+  }, [items, provider, modelId, chatModelId, configuredIds]);
 
   const setModel = (id: string, providerId: ProviderId) => {
-    void setProfileProvider(providerId as any);
+    void setProfileProvider(providerId as RefinementProvider);
     void setProfileModelId(
       isLocalProvider(providerId)
         ? ""

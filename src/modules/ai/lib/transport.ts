@@ -1,5 +1,6 @@
 import {
   notifyChatTurnFinished as notifyTurnFinished,
+  notifyUserMessageSent,
   setAgentProjectRoot,
   startLearningAgent as startAgent,
 } from "@/modules/engineering-profile/learningAgent";
@@ -8,6 +9,7 @@ import {
   anchorProjectRoot,
   resolveProfileProjectRoot,
 } from "@/modules/engineering-profile/projectRoot";
+import { ensureBootstrap } from "@/modules/engineering-profile";
 import type { ContextPackage } from "@/modules/engineering-profile/runtime";
 import {
   buildContextPackage,
@@ -97,36 +99,37 @@ function lastUserTaskText(messages: UIMessage[]): string {
 }
 
 /**
- * Runs the passive observer against every user message in this turn.
- * Captures explicit preference patterns ("I prefer X", "always use Y")
- * even when the agent doesn't proactively call the recording tool.
- *
- * Skips text wrapped in <env> or <file> tags (those are system-injected,
- * not user-authored). Fire-and-forget; the chat run is not blocked.
- *
- * Signals notify the learning agent; refinement runs after the turn ends.
+ * Runs LLM intent observation on the latest user-authored message only.
+ * Must complete before refinement so signals are visible to the extractor.
  */
-async function observeForProfile(
+async function observeLatestUserMessage(
   messages: UIMessage[],
   projectRoot: string | null,
 ): Promise<void> {
+  const text = extractLatestUserText(messages);
+  if (!text) return;
   try {
-    for (const m of messages) {
-      if (m.role !== "user") continue;
-      const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
-      for (const p of parts) {
-        if (p.type !== "text" || !p.text) continue;
-        const cleaned = stripInjectedBlocks(p.text);
-        if (cleaned.trim().length < 4) continue;
-        await observeUserMessage({
-          text: cleaned,
-          projectRoot,
-        });
-      }
-    }
+    await observeUserMessage({ text, projectRoot });
   } catch (err) {
-    console.warn("[engineering-profile] observeForProfile failed:", err);
+    console.warn("[engineering-profile] observeLatestUserMessage failed:", err);
   }
+}
+
+function extractLatestUserText(messages: UIMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
+    const chunks: string[] = [];
+    for (const p of parts) {
+      if (p.type !== "text" || !p.text) continue;
+      const cleaned = stripInjectedBlocks(p.text);
+      if (cleaned) chunks.push(cleaned);
+    }
+    const joined = chunks.join("\n").trim();
+    if (joined.length >= 4) return joined;
+  }
+  return null;
 }
 
 function stripInjectedBlocks(text: string): string {
@@ -203,12 +206,17 @@ export function createContextAwareTransport(deps: Deps) {
         bootstrappedProjects.add(projectRoot);
         void startAgent(projectRoot);
       }
-      // Do not eagerly create .xterax/ here. The skeleton and profile files are
-      // created only when real preference signals are recorded (see recordSignal
-      // + ensureBootstrap). This prevents littering incidental or short-lived
-      // directories with the same initial profile data.
+      // Create (or ensure) the minimal .xterax/profile.md skeleton (# Profile only)
+      // as soon as we have a project context for a chat. The skeleton has no
+      // content (only the heading) so loadProfileArtifacts + isSkeletonProfileMd
+      // treat it as absent for injection. This guarantees .xterax/ exists for
+      // agent inspection and learning, even if the user just started a fresh
+      // session or the previous message didn't contain a preference statement.
+      // Real content is only written later by refinement.
+      await ensureBootstrap(projectRoot).catch(() => {});
     }
-    await observeForProfile(options.messages, projectRoot);
+    await observeLatestUserMessage(options.messages, projectRoot);
+    if (projectRoot) notifyUserMessageSent(projectRoot);
     const projectMemory = await readXteraxMd(live.workspaceRoot);
     const profileArtifacts = projectRoot
       ? await loadProfileArtifacts(projectRoot, 4000)

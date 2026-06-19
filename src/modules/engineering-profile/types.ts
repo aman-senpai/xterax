@@ -95,9 +95,19 @@ export type Signal = {
 
 export type Preference = {
   id: string;
+  /** Stable identity for dedup across rephrasings. Derived from category + content.
+   *  e.g. "tool-usage_edit-vs-multiedit". Same underlying rule → same canonical id. */
+  canonicalRuleId: string;
   category: Domain;
   preference: string;
+  /** How precisely this rule is understood (0–1). Comes from LLM interpretation,
+   *  not from signal frequency. 0.9+ = specific, actionable, unambiguous.
+   *  0.3-0.5 = vague, open to multiple interpretations. */
   confidence: number;
+  /** Weighted reinforcement score from supporting signals. Higher weights for
+   *  profile edits (+5), corrections (+2), explicit statements (+1); lower for
+   *  recurring repeats (+0.25). Measures evidence quality, not volume. */
+  reinforcement: number;
   evidenceCount: number;
   firstObservedAt: number;
   lastObservedAt: number;
@@ -173,11 +183,35 @@ export type RefinementProvider =
   | "anthropic"
   | "google"
   | "groq"
+  | "xai"
+  | "cerebras"
+  | "deepseek"
+  | "mistral"
   | "openrouter"
   | "openai-compatible"
   | "lmstudio"
   | "mlx"
   | "ollama";
+
+const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<RefinementProvider>([
+  "openai",
+  "anthropic",
+  "google",
+  "groq",
+  "xai",
+  "cerebras",
+  "deepseek",
+  "mistral",
+  "openrouter",
+  "openai-compatible",
+  "lmstudio",
+  "mlx",
+  "ollama",
+]);
+
+export function supportsProvider(p: RefinementProvider): boolean {
+  return SUPPORTED_PROVIDERS.has(p);
+}
 
 import type { ThinkingLevel } from "@/modules/ai/lib/thinking";
 
@@ -224,6 +258,10 @@ export type PreferenceCandidate = {
   category: Domain;
   preference: string;
   evidence: string;
+  /** How precisely this rule is interpreted (0–1). Set by the LLM during
+   *  extraction. 0.9+ = the rule is concrete, specific, and unambiguous.
+   *  0.3-0.5 = the interpretation is uncertain or the rule is vague. */
+  precision: number;
   weight: number;
   mergedPriorIds?: string[];
   mappedSignalIds?: string[];

@@ -9,7 +9,7 @@ vi.mock("@/modules/ai/store/chatStore", () => ({
   useChatStore: {
     getState: () => ({
       apiKeys: { openai: "sk-test", anthropic: "", google: "" },
-      selectedModelId: "openai:gpt-5",
+      selectedModelId: "gpt-5.4-mini",
     }),
   },
 }));

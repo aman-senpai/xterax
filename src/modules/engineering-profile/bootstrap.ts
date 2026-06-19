@@ -1,4 +1,5 @@
 import { native } from "@/modules/ai/lib/native";
+import { clearProjectData, projectMirrorExists } from "./storage";
 
 /**
  * Lazily creates the .xterax/ directory on first use.
@@ -8,6 +9,11 @@ import { native } from "@/modules/ai/lib/native";
  *
  *   .xterax/profile.md      (human-readable root profile)
  *
+ * On initial creation this file contains *only* the heading (no project
+ * path or descriptive content) to avoid polluting chat context before
+ * any real preferences have been learned. Real content is written later
+ * by refinement.
+ *
  * Domain subdirectories (.xterax/<domain>/profile.md) are created
  * lazily by the refinement workflow when a domain's split thresholds
  * are met. They are never created here.
@@ -15,8 +21,22 @@ import { native } from "@/modules/ai/lib/native";
  * Idempotent: safe to call on every signal. No-op if .xterax/ already
  * exists.
  */
+/**
+ * When the user deleted .xterax/, drop stale project-scoped store data
+ * before recreating the skeleton mirror. Otherwise ensureBootstrap would
+ * recreate profile.md and resurrect old preferences from the Tauri store.
+ */
+export async function resetProjectStoreIfMirrorMissing(
+  workspaceRoot: string,
+): Promise<void> {
+  if (!(await projectMirrorExists(workspaceRoot))) {
+    await clearProjectData(workspaceRoot);
+  }
+}
+
 export async function ensureBootstrap(workspaceRoot: string): Promise<boolean> {
   if (process.env.VITEST) return true;
+  await resetProjectStoreIfMirrorMissing(workspaceRoot);
   const root = `${workspaceRoot.replace(/\/$/, "")}/.xterax`;
   try {
     await ensureDir(root);
@@ -71,9 +91,9 @@ async function writeFile(path: string, content: string): Promise<void> {
 
 
 
-function renderInitialProfileMd(workspaceRoot: string): string {
-  return `# Profile
-
-Project: \`${workspaceRoot}\`
-`;
+function renderInitialProfileMd(_workspaceRoot: string): string {
+  // Intentionally minimal: only the heading. No project path or boilerplate
+  // on first creation. Real content is added later by refinement when actual
+  // signals exist. This avoids injecting polluted/empty context into chats.
+  return "# Profile\n";
 }
