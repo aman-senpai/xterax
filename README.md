@@ -13,7 +13,7 @@
 
 ---
 
-> **Xterax is a custom fork of [Terax](https://github.com/jemscollin1/terax)** by [aman-senpai](https://github.com/aman-senpai). Terax is the original lightweight terminal-first AI-native dev workspace — all credit for the foundation, architecture, and vision goes to the Terax project and its author. Xterax is not a replacement; it's a juiced-up version built for extreme agentic workflows and personal use, with deeper AI integration, autonomous learning, and a custom engineering profile system. Think of it as Terax on overdrive.
+> **Xterax is a custom fork of [Terax](https://github.com/jemscollin1/terax)** by [aman-senpai](https://github.com/aman-senpai). Terax is the original lightweight terminal-first AI-native dev workspace — all credit for the foundation, architecture, and vision goes to the [Terax-AI](https://github.com/jemscollin1/terax) project and its creator. Xterax is not a replacement; it's a juiced-up version built for extreme agentic workflows and personal use, with deeper AI integration, autonomous learning, and a custom engineering profile system. Think of it as Terax on overdrive.
 
 Xterax is a lightweight open-source terminal (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
 
