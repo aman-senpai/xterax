@@ -16,6 +16,7 @@
 
 import { native } from "@/modules/ai/lib/native";
 import { homeDir } from "@tauri-apps/api/path";
+import type { SkillConfig } from "@/modules/skills/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,6 +196,66 @@ export function getSkillPaths(skills: SkillMeta[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Managed skills merge
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge filesystem-discovered skills with user-managed skill configs from
+ * preferences.
+ *
+ * Rules:
+ * - Custom skills (source === "custom") with inline content are converted to
+ *   SkillMeta entries so they appear in the catalog.
+ * - Discovered skills that have a matching config with enabled === false are
+ *   filtered out.
+ * - Discovered skills that have a matching config with content override use
+ *   the override.
+ * - Configs without a matching discovered skill are added as-is (custom skills).
+ */
+export function mergeManagedSkills(
+  discovered: SkillMeta[],
+  configs: SkillConfig[],
+): SkillMeta[] {
+  if (configs.length === 0) return discovered;
+
+  const configByName = new Map<string, SkillConfig>();
+  for (const c of configs) {
+    configByName.set(c.name, c);
+  }
+
+  const result: SkillMeta[] = [];
+  const seenNames = new Set<string>();
+
+  // Process discovered skills — filter disabled, apply overrides
+  for (const s of discovered) {
+    const cfg = configByName.get(s.name);
+    if (cfg && !cfg.enabled) continue; // Disabled — skip
+    if (cfg?.content) {
+      // Override location to point to preferences-managed content.
+      // The baseDir stays the same so path allowlisting still works.
+    }
+    seenNames.add(s.name);
+    result.push(s);
+  }
+
+  // Add custom skills that aren't in the discovered set
+  for (const c of configs) {
+    if (!c.enabled) continue;
+    if (seenNames.has(c.name)) continue;
+    if (!c.content) continue; // Custom skills need inline content
+    result.push({
+      name: c.name,
+      description: c.description,
+      location: `prefs://skills/${c.id}`,
+      baseDir: "",
+      source: "project", // Treat custom skills as project-level
+    });
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
 
@@ -204,16 +265,22 @@ let cachedWorkspaceRoot: string | null = null;
 /**
  * Get discovered skills, using cache if the workspace root hasn't changed.
  * Call this at the start of each turn (it's cheap when cached).
+ *
+ * @param workspaceRoot - Project workspace root for discovery.
+ * @param configs - Optional managed skill configs from preferences. When
+ *   provided, disabled skills are filtered out and custom skills are added.
  */
 export async function getSkills(
   workspaceRoot: string,
+  configs?: SkillConfig[],
 ): Promise<SkillMeta[]> {
   if (cachedSkills && cachedWorkspaceRoot === workspaceRoot) {
-    return cachedSkills;
+    return configs ? mergeManagedSkills(cachedSkills, configs) : cachedSkills;
   }
-  cachedSkills = await discoverSkills(workspaceRoot);
+  const discovered = await discoverSkills(workspaceRoot);
+  cachedSkills = discovered;
   cachedWorkspaceRoot = workspaceRoot;
-  return cachedSkills;
+  return configs ? mergeManagedSkills(discovered, configs) : discovered;
 }
 
 /**

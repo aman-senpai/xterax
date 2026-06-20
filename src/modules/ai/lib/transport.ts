@@ -24,6 +24,7 @@ import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import { native } from "./native";
 import { getSkills } from "../skills/skills";
 import { applyOverrides, type PromptKey } from "./prompts";
+import type { SkillConfig } from "@/modules/skills/types";
 
 const XTERAX_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
@@ -184,6 +185,7 @@ type Deps = {
   onTurnFinish?: () => void;
   getPlanMode?: () => boolean;
   getThinkingLevel?: () => string;
+  getSkillsConfigs?: () => SkillConfig[];
 };
 
 type SendOptions = {
@@ -221,8 +223,11 @@ export function createContextAwareTransport(deps: Deps) {
     if (projectRoot) notifyUserMessageSent(projectRoot);
 
     // Discover agent skills (cached per workspace root).
+    // Merge with managed skill configs from preferences (enable/disable,
+    // custom inline skills).
+    const skillsConfigs = deps.getSkillsConfigs?.() ?? [];
     const skills = live.workspaceRoot
-      ? await getSkills(live.workspaceRoot)
+      ? await getSkills(live.workspaceRoot, skillsConfigs)
       : null;
 
     // Load prompt overrides from .xterax/prompts/ (cached per workspace).

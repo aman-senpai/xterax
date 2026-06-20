@@ -65,6 +65,20 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     },
   };
 
+// MCP tools have names like `mcp__<serverId>__<toolName>` — match generically.
+function toolLabel(toolName: string): (i: Record<string, unknown>) => string {
+  const known = TOOL_LABELS[toolName];
+  if (known) return known;
+  if (toolName.startsWith("mcp__")) {
+    // Extract server id and tool name from: mcp__<serverId>__<toolName>
+    const parts = toolName.split("__");
+    const serverId = parts[1] ?? "?";
+    const mcpTool = parts.slice(2).join("__") || "?";
+    return () => `MCP:${serverId}/${mcpTool}`;
+  }
+  return () => `Calling ${toolName}`;
+}
+
 function shortPath(p: unknown): string {
   if (typeof p !== "string") return "";
   const i = p.lastIndexOf("/");
@@ -526,11 +540,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) {
-          const label = TOOL_LABELS[last.toolName];
+          const label = toolLabel(last.toolName);
           opts.onStep(
-            label
-              ? label((last.input ?? {}) as Record<string, unknown>)
-              : `Calling ${last.toolName}`,
+            label((last.input ?? {}) as Record<string, unknown>),
           );
         } else if (step.text) {
           opts.onStep("Writing");

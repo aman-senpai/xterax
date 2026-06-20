@@ -6,7 +6,9 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AiScanIcon,
   InformationCircleIcon,
+  McpServerIcon,
   PaintBoardIcon,
+  PuzzleIcon,
   Settings01Icon,
   ShieldIcon,
   UserMultiple02Icon,
@@ -19,11 +21,13 @@ import { type JSX, useEffect, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { GeneralSection } from "./sections/GeneralSection";
+import { McpSection } from "./sections/McpSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { PermissionsSection } from "./sections/PermissionsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
 import { PromptsSection } from "./sections/PromptsSection";
+import { SkillsSection } from "./sections/SkillsSection";
 
 const TABS: {
   id: SettingsTab;
@@ -69,6 +73,18 @@ const TABS: {
     component: PromptsSection,
   },
   {
+    id: "mcp",
+    label: "MCP",
+    icon: McpServerIcon,
+    component: McpSection,
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: PuzzleIcon,
+    component: SkillsSection,
+  },
+  {
     id: "about",
     label: "About",
     icon: InformationCircleIcon,
@@ -84,6 +100,8 @@ const VALID_TABS: SettingsTab[] = [
   "models",
   "agents",
   "prompts",
+  "mcp",
+  "skills",
   "about",
 ];
 

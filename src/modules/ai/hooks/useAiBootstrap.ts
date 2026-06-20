@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
+import { mcpSyncServers, mcpListTools } from "@/modules/mcp/client";
+import { cacheMcpTools, clearMcpToolCache } from "@/modules/mcp/tools";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import {
@@ -117,6 +119,53 @@ export function useAiBootstrap(): {
       applyOverrides(promptOverrides);
     }
   }, [prefsHydrated, promptOverrides]);
+
+  // Sync MCP servers: start/stop processes and cache discovered tools.
+  const mcpServers = usePreferencesStore((s) => s.mcpServers);
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    let cancelled = false;
+    void (async () => {
+      console.log(
+        `[MCP] Syncing ${mcpServers.filter((s) => s.enabled).length} enabled / ${mcpServers.length} total servers…`,
+      );
+      let statuses: Awaited<ReturnType<typeof mcpSyncServers>>;
+      try {
+        statuses = await mcpSyncServers(mcpServers);
+      } catch (e) {
+        console.error(
+          `[MCP] mcpSyncServers threw: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+      if (cancelled) return;
+      clearMcpToolCache();
+      for (const s of statuses) {
+        if (!s.connected) {
+          if (s.error) {
+            console.warn(
+              `[MCP] Server "${s.name}" (${s.id}) failed to connect: ${s.error}`,
+            );
+          }
+          continue;
+        }
+        console.log(
+          `[MCP] Server "${s.name}" (${s.id}) connected with ${s.tool_count} tools`,
+        );
+        try {
+          const tools = await mcpListTools(s.id);
+          cacheMcpTools(s.id, s.name, tools);
+        } catch (e) {
+          console.warn(
+            `[MCP] Server "${s.name}" (${s.id}) tools/list failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prefsHydrated, mcpServers]);
 
   return { hasComposer, keysLoaded };
 }

@@ -17,6 +17,8 @@ import {
   type ThinkingLevel,
 } from "@/modules/ai/lib/thinking";
 import type { RefinementProvider } from "@/modules/engineering-profile/types";
+import type { McpServerConfig } from "@/modules/mcp/types";
+import type { SkillConfig } from "@/modules/skills/types";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -132,6 +134,8 @@ export type Preferences = {
   editorAutoSave: boolean;
   editorAutoSaveDelay: number;
   permissions: PermissionSettings;
+  mcpServers: McpServerConfig[];
+  skillsConfigs: SkillConfig[];
 };
 
 const STORE_PATH = "xterax-settings.json";
@@ -188,6 +192,8 @@ const KEY_SHORTCUTS = "shortcuts";
 const KEY_EDITOR_AUTO_SAVE = "editorAutoSave";
 const KEY_EDITOR_AUTO_SAVE_DELAY = "editorAutoSaveDelay";
 const KEY_PERMISSIONS = "permissions";
+const KEY_MCP_SERVERS = "mcpServers";
+const KEY_SKILLS_CONFIGS = "skillsConfigs";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -286,6 +292,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorAutoSave: false,
   editorAutoSaveDelay: 1000,
   permissions: DEFAULT_PERMISSIONS,
+  mcpServers: [],
+  skillsConfigs: [],
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -455,6 +463,12 @@ export async function loadPreferences(): Promise<Preferences> {
     permissions:
       get<PermissionSettings>(KEY_PERMISSIONS) ??
       DEFAULT_PREFERENCES.permissions,
+    mcpServers:
+      get<McpServerConfig[]>(KEY_MCP_SERVERS) ??
+      DEFAULT_PREFERENCES.mcpServers,
+    skillsConfigs:
+      get<SkillConfig[]>(KEY_SKILLS_CONFIGS) ??
+      DEFAULT_PREFERENCES.skillsConfigs,
   };
 }
 
@@ -721,6 +735,14 @@ export async function setPermissions(value: PermissionSettings): Promise<void> {
   await writePref(KEY_PERMISSIONS, value);
 }
 
+export async function setMcpServers(value: McpServerConfig[]): Promise<void> {
+  await writePref(KEY_MCP_SERVERS, value);
+}
+
+export async function setSkillsConfigs(value: SkillConfig[]): Promise<void> {
+  await writePref(KEY_SKILLS_CONFIGS, value);
+}
+
 export async function setShortcuts(
   value: Record<ShortcutId, KeyBinding[]> | {},
 ): Promise<void> {
@@ -790,6 +812,8 @@ export async function onPreferencesChange(
     [KEY_EDITOR_AUTO_SAVE]: "editorAutoSave",
     [KEY_EDITOR_AUTO_SAVE_DELAY]: "editorAutoSaveDelay",
     [KEY_PERMISSIONS]: "permissions",
+    [KEY_MCP_SERVERS]: "mcpServers",
+    [KEY_SKILLS_CONFIGS]: "skillsConfigs",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

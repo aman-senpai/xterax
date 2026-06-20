@@ -84,6 +84,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getOpenrouterModelId: () =>
       usePreferencesStore.getState().openrouterModelId,
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
+    getSkillsConfigs: () => usePreferencesStore.getState().skillsConfigs,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });

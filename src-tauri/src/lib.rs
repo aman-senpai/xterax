@@ -1,6 +1,6 @@
 pub mod modules;
 
-use modules::{agent, fs, git, history, net, pty, secrets, shell, workspace};
+use modules::{agent, fs, git, history, mcp, net, pty, secrets, shell, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
@@ -169,6 +169,7 @@ pub fn run() {
             }
             registry
         })
+        .manage(mcp::McpState::new())
         .manage(LaunchDir(Mutex::new(cli_dir)))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
@@ -242,6 +243,12 @@ pub fn run() {
             history::history_commands,
             history::history_record,
             history::history_list,
+            mcp::mcp_connect,
+            mcp::mcp_disconnect,
+            mcp::mcp_list_tools,
+            mcp::mcp_call_tool,
+            mcp::mcp_get_status,
+            mcp::mcp_sync_servers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
