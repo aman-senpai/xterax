@@ -101,6 +101,17 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
 
 export const BUILTIN_AGENTS: readonly Agent[] = [
   {
+    id: "builtin:xterax",
+    name: "Xterax",
+    description:
+      "Unified default agent. Plans complex work, delegates to specialists, executes efficiently.",
+    icon: "spark" as AgentIconId,
+    builtIn: true,
+    instructions: getAgentPrompt("xterax"),
+    toolAllowlist: null,
+    shellAllowlist: ["*"],
+  },
+  {
     id: "builtin:coder",
     name: "Coder",
     description: "General-purpose coding assistant. Writes, edits, and runs.",

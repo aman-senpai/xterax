@@ -3,6 +3,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
+import { useMutationStore } from "../store/mutationStore";
 import { resolvePath, type ToolContext } from "./context";
 
 type EditResult =
@@ -20,6 +21,7 @@ async function applyEdits(
   edits: { old_string: string; new_string: string; replace_all?: boolean }[],
   kind: "edit" | "multi_edit",
   readCache: Map<string, { size: number; hash: number }>,
+  sessionId: string | null,
 ): Promise<EditResult> {
   const r = await native.readFile(abs);
   if (r.kind === "binary") return { error: "binary file refused", path: abs };
@@ -105,6 +107,17 @@ async function applyEdits(
   try {
     await native.writeFile(abs, content);
     readCache.set(abs, { size: content.length, hash: djb2(content) });
+    // Record mutation for session-level restore.
+    if (sessionId) {
+      useMutationStore.getState().record({
+        sessionId,
+        kind,
+        path: abs,
+        originalContent: original,
+        newContent: content,
+        isNewFile: false,
+      });
+    }
     return {
       ok: true,
       replacements: totalReplacements,
@@ -152,6 +165,7 @@ export function buildEditTools(ctx: ToolContext) {
           [{ old_string, new_string, replace_all }],
           "edit",
           ctx.readCache,
+          ctx.getSessionId(),
         );
       },
     }),
@@ -187,7 +201,7 @@ export function buildEditTools(ctx: ToolContext) {
             path: abs,
           };
         }
-        return applyEdits(abs, edits, "multi_edit", ctx.readCache);
+        return applyEdits(abs, edits, "multi_edit", ctx.readCache, ctx.getSessionId());
       },
     }),
   } as const;

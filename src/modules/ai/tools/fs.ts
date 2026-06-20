@@ -6,6 +6,7 @@ import {
   checkWritableCanonical,
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
+import { useMutationStore } from "../store/mutationStore";
 import { resolvePath, type ToolContext } from "./context";
 
 const READ_BYTE_CAP = 25 * 1024;
@@ -164,15 +165,17 @@ export function buildFsTools(ctx: ToolContext) {
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
 
+        // Read original content for mutation tracking / plan mode.
+        let original = "";
+        let isNewFile = false;
+        try {
+          const r = await native.readFile(abs);
+          if (r.kind === "text") original = r.content;
+        } catch {
+          isNewFile = true;
+        }
+
         if (usePlanStore.getState().active) {
-          let original = "";
-          let isNewFile = false;
-          try {
-            const r = await native.readFile(abs);
-            if (r.kind === "text") original = r.content;
-          } catch {
-            isNewFile = true;
-          }
           usePlanStore.getState().enqueue({
             id: newQueuedEditId(),
             kind: "write_file",
@@ -191,6 +194,18 @@ export function buildFsTools(ctx: ToolContext) {
         try {
           await native.writeFile(abs, content);
           ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+          // Record mutation for session-level restore.
+          const sessionId = ctx.getSessionId();
+          if (sessionId) {
+            useMutationStore.getState().record({
+              sessionId,
+              kind: "write_file",
+              path: abs,
+              originalContent: original,
+              newContent: content,
+              isNewFile,
+            });
+          }
           return { path: abs, bytesWritten: content.length, ok: true };
         } catch (e) {
           return { error: String(e), path: abs };
@@ -227,6 +242,18 @@ export function buildFsTools(ctx: ToolContext) {
         }
         try {
           await native.createDir(abs);
+          // Record mutation for session-level restore.
+          const sessionId = ctx.getSessionId();
+          if (sessionId) {
+            useMutationStore.getState().record({
+              sessionId,
+              kind: "create_directory",
+              path: abs,
+              originalContent: "",
+              newContent: "",
+              isNewFile: true,
+            });
+          }
           return { path: abs, ok: true };
         } catch (e) {
           return { error: String(e), path: abs };

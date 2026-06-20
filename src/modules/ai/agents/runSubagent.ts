@@ -1,5 +1,6 @@
 import { streamText, stepCountIs } from "ai";
 import { resolveModel, selectSystemPrompt } from "../config";
+import { getAgentPrompt, getSubagentSystemPrompt } from "../lib/prompts";
 import { buildConfiguredLanguageModel } from "../lib/agent";
 import {
   buildThinkingProviderOptions,
@@ -41,6 +42,7 @@ type Args = {
   jobId: string;
   prompt: string;
   description?: string;
+  agentType?: string | null;
   keys: ProviderKeys;
   modelId: string;
   thinkingLevel: ThinkingLevel;
@@ -246,6 +248,7 @@ function buildSubagentToolSet(
 async function runSubagent({
   jobId,
   prompt,
+  agentType,
   keys,
   modelId,
   thinkingLevel,
@@ -268,8 +271,16 @@ async function runSubagent({
   const info = resolveModel(modelId, prefs.customEndpoints);
   const provider = info.provider;
 
-  // ── System prompt (same as main agent) ──────────────────────────────
-  const systemPrompt = selectSystemPrompt(modelId);
+  // ── System prompt ───────────────────────────────────────────────────
+  // When agentType is set, inject the specialist persona so the subagent
+  // has domain expertise on top of its tool-first behavior.
+  const baseSystem = agentType
+    ? getSubagentSystemPrompt() +
+      "\n\n## SPECIALIST ROLE — " +
+      agentType +
+      "\n" +
+      getAgentPrompt(agentType)
+    : selectSystemPrompt(modelId);
 
   // ── Thinking config ─────────────────────────────────────────────────
   const providerOptions = buildThinkingProviderOptions(
@@ -290,7 +301,7 @@ async function runSubagent({
   // ── Stream (live text pushed to progress store) ────────────────────
   const result = streamText({
     model,
-    system: systemPrompt,
+    system: baseSystem,
     prompt,
     tools: tools as Parameters<typeof streamText>[0]["tools"],
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),

@@ -29,6 +29,7 @@ import {
   CopyIcon,
   File01Icon,
   HashtagIcon,
+  RefreshIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, XTERAX_CMD_RE } from "../lib/slashCommands";
@@ -36,6 +37,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { useChatStore } from "../store/chatStore";
 import { sendMessage } from "../store/chatRuntime";
+import { useRewindStore } from "../store/rewindStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -277,10 +279,11 @@ export function AiChatView({
   return (
     <Conversation>
       <ConversationContent className="gap-5 p-3">
-        {messages.map((m) => (
+        {messages.map((m, idx) => (
           <RenderedMessage
             key={m.id}
             message={m}
+            messageIndex={idx}
             onApproval={onApproval}
             streaming={m.id === streamingMessageId}
             pendingCount={pendingCount}
@@ -422,8 +425,52 @@ const CopyMessageButton = memo(function CopyMessageButton({
   );
 });
 
+const RewindButton = memo(function RewindButton({
+  messageIndex,
+}: {
+  messageIndex: number;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const tRef = useRef<number>(0);
+
+  useEffect(() => () => window.clearTimeout(tRef.current), []);
+
+  const onRewind = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm) {
+      setConfirm(true);
+      tRef.current = window.setTimeout(() => setConfirm(false), 3000);
+      return;
+    }
+    const sessionId = useChatStore.getState().activeSessionId;
+    if (!sessionId) return;
+    useRewindStore.getState().rewind(sessionId, messageIndex);
+    setConfirm(false);
+  };
+
+  return (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      onClick={onRewind}
+      className={cn(
+        "size-6 rounded-md transition-colors",
+        confirm
+          ? "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20"
+          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+      )}
+      aria-label={confirm ? "Click again to confirm rewind" : "Rewind to here"}
+      title={confirm ? "Click again to confirm rewind" : "Rewind to here"}
+    >
+      <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
+    </Button>
+  );
+});
+
 const RenderedMessage = memo(function RenderedMessage({
   message,
+  messageIndex,
   onApproval,
   streaming,
   pendingCount,
@@ -431,6 +478,7 @@ const RenderedMessage = memo(function RenderedMessage({
   onDenyAll,
 }: {
   message: UIMessage;
+  messageIndex: number;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   pendingCount: number;
@@ -530,8 +578,9 @@ const RenderedMessage = memo(function RenderedMessage({
         </div>
       </MessageContent>
       {assistantText && (
-        <div className="mt-1 flex items-center justify-start px-1">
+        <div className="mt-1 flex items-center justify-start gap-1 px-1">
           <CopyMessageButton text={assistantText} label="Copy response" />
+          <RewindButton messageIndex={messageIndex} />
         </div>
       )}
     </Message>

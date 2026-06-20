@@ -393,6 +393,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
     titleGenAttempted.delete(id);
     void deleteSessionData(id);
     void useTodosStore.getState().clearSession(id);
+    // Clear mutation tracking + queued messages for this session.
+    import("./mutationStore").then((m) =>
+      m.useMutationStore.getState().clear(id),
+    );
+    import("./queueStore").then((q) =>
+      q.useQueueStore.getState().clear(id),
+    );
 
     if (remaining.length === 0) {
       const freshId = newSessionId();

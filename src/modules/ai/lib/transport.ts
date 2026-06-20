@@ -434,7 +434,7 @@ async function loadPromptOverridesForWorkspace(
     "subagent-system", "title-generation", "autocomplete-system",
     "autocomplete-user", "init-command", "claude-code-directive",
     "continue-message", "elision-text",
-    "agent-coder", "agent-architect", "agent-reviewer",
+    "agent-xterax", "agent-coder", "agent-architect", "agent-reviewer",
     "agent-security", "agent-designer", "skills-preamble",
   ];
 

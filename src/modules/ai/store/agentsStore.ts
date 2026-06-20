@@ -130,9 +130,16 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       loadAgents(),
       loadBuiltinOverrides(),
     ]);
+    // One-time migration: users on the old default (builtin:coder) get the
+    // new unified default (builtin:xterax).
+    let activeId = agents.activeId;
+    if (activeId === "builtin:coder") {
+      activeId = "builtin:xterax";
+      void saveActiveAgentId(activeId);
+    }
     set({
       customAgents: agents.custom,
-      activeId: agents.activeId,
+      activeId,
       builtinOverrides: overrides,
       hydrated: true,
     });

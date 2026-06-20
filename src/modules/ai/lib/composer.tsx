@@ -21,7 +21,7 @@ export type FileAttachment = {
   source?: "terminal" | "editor";
 };
 
-type MessagePart =
+export type MessagePart =
   | { type: "text"; text: string }
   | { type: "file"; mediaType: string; url: string; filename?: string };
 
@@ -101,6 +101,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   // Re-focus the textarea when the agent finishes — but only if the user
   // hasn't moved focus elsewhere (e.g. terminal, editor). Otherwise the
   // agent would steal focus every time it completes a tool call or response.
+  // Also drains queued messages when the agent becomes idle.
   const prevIsBusyRef = useRef(false);
   useEffect(() => {
     if (prevIsBusyRef.current && !isBusy) {
@@ -111,9 +112,22 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (!el || el === document.body || (ta && ta.contains(el))) {
         requestAnimationFrame(() => ta?.focus());
       }
+      // Drain queued messages — send the oldest queued message.
+      if (sessionId) {
+        void (async () => {
+          const { useQueueStore } = await import("../store/queueStore");
+          const queued = useQueueStore.getState().dequeue(sessionId);
+          if (!queued) return;
+          const { getOrCreateChat } = await import("../store/chatRuntime");
+          const chat = getOrCreateChat(sessionId);
+          void chat.sendMessage({ role: "user", parts: queued.parts } as Parameters<
+            typeof chat.sendMessage
+          >[0]);
+        })();
+      }
     }
     prevIsBusyRef.current = isBusy;
-  }, [isBusy, textareaRef]);
+  }, [isBusy, sessionId, textareaRef]);
 
   // Listen for explorer's "Attach to Agent" event.
   useEffect(() => {
@@ -224,7 +238,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const submit = () => {
-    if (isBusy) return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -318,6 +331,26 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
 
     if (!sessionId) return;
+
+    if (isBusy) {
+      // Queue the message — it will be sent automatically when the current
+      // turn finishes.
+      void import("../store/queueStore").then(({ useQueueStore }) => {
+        useQueueStore.getState().enqueue(
+          sessionId,
+          parts,
+          pickedSnippets.map((s) => s.handle),
+          pickedCommands.map((c) => c.name),
+        );
+      });
+      setValue("");
+      setFiles([]);
+      setPickedSnippets([]);
+      setPickedCommands([]);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
+
     const store = useChatStore.getState();
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     if (!store.rightPanelOpen) store.openRightPanel();
@@ -342,7 +375,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const canSend =
-    !isBusy &&
     (value.trim().length > 0 ||
       files.length > 0 ||
       pickedSnippets.length > 0 ||

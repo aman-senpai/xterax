@@ -18,6 +18,7 @@ import {
   Edit02Icon,
   FilterIcon,
   FlashIcon,
+  RefreshIcon,
   ShieldUserIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
@@ -32,9 +33,11 @@ import {
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import type { SessionMeta } from "../lib/sessions";
 import { useChatStore } from "../store/chatStore";
-import { getOrCreateChat } from "../store/chatRuntime";
+import { getOrCreateChat, sendMessage } from "../store/chatRuntime";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { usePlanStore } from "../store/planStore";
+import { useMutationStore } from "../store/mutationStore";
+import { useQueueStore } from "../store/queueStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { AiComposerInput } from "./AiComposerInput";
@@ -107,6 +110,10 @@ const selectPlanQueueLen = (s: ReturnType<typeof usePlanStore.getState>) =>
   s.queue.length;
 const selectPlanDisable = (s: ReturnType<typeof usePlanStore.getState>) =>
   s.disable;
+const selectPlanSource = (s: ReturnType<typeof usePlanStore.getState>) =>
+  s.source;
+const selectAgentStatus = (s: ReturnType<typeof useChatStore.getState>) =>
+  s.agentMeta.status;
 const selectOpenaiCompatContextLimit = (
   s: ReturnType<typeof usePreferencesStore.getState>,
 ) => s.openaiCompatibleContextLimit;
@@ -178,6 +185,8 @@ function Body({ sessionId }: { sessionId: string }) {
       ) : null}
 
       <PlanModeStrip />
+      <RestoreStrip sessionId={sessionId} />
+      <QueueStrip sessionId={sessionId} />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 ? (
@@ -241,16 +250,40 @@ function Body({ sessionId }: { sessionId: string }) {
 function PlanModeStrip() {
   const active = usePlanStore(selectPlanActive);
   const queueLen = usePlanStore(selectPlanQueueLen);
+  const source = usePlanStore(selectPlanSource);
+  const agentStatus = useChatStore(selectAgentStatus);
   const disable = usePlanStore(selectPlanDisable);
+
   if (!active) return null;
+
+  const isAgentWaiting = source === "agent" && agentStatus === "idle";
+
+  const handleApprove = () => {
+    disable();
+    void sendMessage("Plan approved — proceed with implementation.");
+  };
+
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/40 bg-muted/40 px-3 py-1.5">
+    <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-3 py-1.5">
       <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />
       <span className="text-[11px] font-medium text-foreground">Plan mode</span>
-      <span className="text-[11px] text-muted-foreground">
-        {queueLen > 0 ? `· ${queueLen} queued` : "· no edits queued"}
-      </span>
+      {isAgentWaiting ? (
+        <span className="text-[11px] text-amber-600">— awaiting approval</span>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">
+          {queueLen > 0 ? `· ${queueLen} queued` : "· no edits queued"}
+        </span>
+      )}
       <span className="flex-1" />
+      {isAgentWaiting && (
+        <button
+          type="button"
+          onClick={handleApprove}
+          className="rounded px-2 py-0.5 text-[10.5px] font-medium bg-amber-500 text-white transition-colors hover:bg-amber-600"
+        >
+          Approve plan
+        </button>
+      )}
       <button
         type="button"
         onClick={() => disable()}
@@ -258,6 +291,90 @@ function PlanModeStrip() {
       >
         Exit
       </button>
+    </div>
+  );
+}
+
+function RestoreStrip({ sessionId }: { sessionId: string }) {
+  const [restoring, setRestoring] = useState(false);
+  const count = useMutationStore(
+    (s) => s.bySession[sessionId]?.length ?? 0,
+  );
+
+  if (count === 0) return null;
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const result = await useMutationStore.getState().restore(sessionId);
+      const msg =
+        result.failed === 0
+          ? `Restored ${result.ok} file(s).`
+          : `Restored ${result.ok} file(s), ${result.failed} failed.`;
+      console.info(`[restore] ${msg}`);
+    } catch (e) {
+      console.warn("[restore] failed:", e);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5">
+      <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+      <span className="text-[11px] font-medium text-foreground">Changes</span>
+      <span className="text-[11px] text-muted-foreground">
+        · {count} file{count === 1 ? "" : "s"} modified
+      </span>
+      <span className="flex-1" />
+      <button
+        type="button"
+        onClick={handleRestore}
+        disabled={restoring}
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/10 hover:text-emerald-700 disabled:opacity-50"
+      >
+        <HugeiconsIcon
+          icon={RefreshIcon}
+          size={10}
+          strokeWidth={2}
+          className={restoring ? "animate-spin" : ""}
+        />
+        {restoring ? "Restoring…" : "Restore"}
+      </button>
+    </div>
+  );
+}
+
+function QueueStrip({ sessionId }: { sessionId: string }) {
+  const count = useQueueStore((s) => s.count(sessionId));
+  const agentStatus = useChatStore(selectAgentStatus);
+  const isBusy = agentStatus === "thinking" || agentStatus === "streaming";
+
+  if (count === 0 && !isBusy) return null;
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-blue-500/20 bg-blue-500/5 px-3 py-1.5">
+      <span className="size-1.5 shrink-0 rounded-full bg-blue-500" />
+      <span className="text-[11px] font-medium text-foreground">
+        {isBusy ? "Processing" : "Queued"}
+      </span>
+      <span className="text-[11px] text-muted-foreground">
+        {isBusy && count > 0
+          ? `· ${count} message${count === 1 ? "" : "s"} queued`
+          : !isBusy && count > 0
+            ? `· ${count} message${count === 1 ? "" : "s"} waiting`
+            : "· waiting for response"}
+      </span>
+      <span className="flex-1" />
+      {count > 0 && !isBusy && (
+        <button
+          type="button"
+          onClick={() => useQueueStore.getState().clear(sessionId)}
+          className="rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          Clear
+        </button>
+      )}
     </div>
   );
 }

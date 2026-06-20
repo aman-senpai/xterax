@@ -41,8 +41,18 @@ const selectActiveId = (s: ReturnType<typeof useAgentsStore.getState>) =>
 const selectSetActiveId = (s: ReturnType<typeof useAgentsStore.getState>) =>
   s.setActiveId;
 
+/** Built-in specialist agents (all except the unified default). */
+const SPECIALIST_IDS = new Set([
+  "builtin:coder",
+  "builtin:architect",
+  "builtin:reviewer",
+  "builtin:security",
+  "builtin:designer",
+]);
+
+const DEFAULT_AGENT_ID = "builtin:xterax";
+
 export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
-  // Subscribe to customAgents + activeId so the trigger updates live.
   const customAgents = useAgentsStore(selectCustomAgents);
   const activeId = useAgentsStore(selectActiveId);
   const setActiveId = useAgentsStore(selectSetActiveId);
@@ -51,7 +61,10 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
   void customAgents; // keeps the store subscription alive
 
   const active = list.find((a) => a.id === activeId) ?? list[0];
+  const isDefault = activeId === DEFAULT_AGENT_ID;
+
   const builtIn = list.filter((a) => a.builtIn);
+  const specialists = builtIn.filter((a) => SPECIALIST_IDS.has(a.id));
   const custom = list.filter((a) => !a.builtIn);
   const ActiveIcon = ICONS[active.icon] ?? SparklesIcon;
 
@@ -66,10 +79,15 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
               ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground min-w-0 overflow-hidden"
               : "text-xs mr-1",
           )}
-          title={`Agent: ${active.name}`}
+          title={`Agent: ${active.name}${isDefault ? " (Default)" : ""}`}
         >
           <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
           <span className="min-w-0 truncate">{active.name}</span>
+          {isDefault && (
+            <span className="text-[9px] text-amber-500/80 ml-0.5 shrink-0">
+              ★
+            </span>
+          )}
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={10}
@@ -79,18 +97,36 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-60">
-        <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-          Built-in
+        {/* Current agent indicator */}
+        <div className="px-2 pt-1.5 pb-1 flex items-center gap-1.5">
+          <HugeiconsIcon
+            icon={ActiveIcon}
+            size={11}
+            strokeWidth={1.75}
+            className="text-foreground"
+          />
+          <span className="text-[11px] font-medium">{active.name}</span>
+          {isDefault && (
+            <span className="text-[9px] text-amber-500/80 ml-auto">Default</span>
+          )}
         </div>
-        {builtIn.map((a) => {
+
+        <DropdownMenuSeparator />
+
+        {/* Specialists — for delegation or direct use */}
+        <div className="px-2 pt-1 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          Specialists
+        </div>
+        {specialists.map((a) => {
           const Icon = ICONS[a.icon] ?? SparklesIcon;
+          const isActive = a.id === activeId;
           return (
             <DropdownMenuItem
               key={a.id}
               onSelect={() => setActiveId(a.id)}
               className={cn(
                 "flex items-start gap-2 pr-2 text-[12px]",
-                a.id === activeId && "bg-accent/40",
+                isActive && "bg-accent/40",
               )}
             >
               <HugeiconsIcon
@@ -99,9 +135,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
                 strokeWidth={1.75}
                 className={cn(
                   "mt-0.5",
-                  a.id === activeId
-                    ? "text-foreground"
-                    : "text-muted-foreground",
+                  isActive ? "text-foreground" : "text-muted-foreground",
                 )}
               />
               <span className="flex min-w-0 flex-1 flex-col">
@@ -110,7 +144,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
                   {a.description}
                 </span>
               </span>
-              {a.id === activeId ? (
+              {isActive ? (
                 <HugeiconsIcon
                   icon={Tick02Icon}
                   size={12}
@@ -121,6 +155,23 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
             </DropdownMenuItem>
           );
         })}
+
+        {/* Back to default */}
+        {!isDefault && (
+          <DropdownMenuItem
+            onSelect={() => setActiveId(DEFAULT_AGENT_ID)}
+            className="flex items-center gap-2 text-[12px] text-amber-500/90"
+          >
+            <HugeiconsIcon
+              icon={SparklesIcon}
+              size={13}
+              strokeWidth={1.75}
+              className="mt-0.5"
+            />
+            <span>Switch to Xterax (Default)</span>
+          </DropdownMenuItem>
+        )}
+
         {custom.length > 0 ? (
           <>
             <DropdownMenuSeparator />

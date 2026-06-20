@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowRight01Icon,
   Mic01Icon,
+  Queue01Icon,
   StopCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -659,23 +660,42 @@ export function AiComposerInput() {
             {/* Ghost text autocomplete overlay — rendered as [data-ghost] span
                 inside the contentEditable via useChatAutocomplete. */}
 
-            {/* Top-right: send / stop */}
+            {/* Top-right: stop / send / queue */}
             {c.isBusy ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                onClick={c.stop}
-                className="absolute right-1 top-1 size-6"
-                aria-label="Stop"
-                title="Stop"
-              >
-                <HugeiconsIcon
-                  icon={StopCircleIcon}
-                  size={13}
-                  strokeWidth={1.75}
-                />
-              </Button>
+              <div className="absolute right-1 top-1 flex items-center gap-1">
+                {c.canSend && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={c.submit}
+                    className="size-6 rounded-md text-muted-foreground hover:text-foreground"
+                    aria-label="Queue message"
+                    title="Queue message (will send after current turn)"
+                  >
+                    <HugeiconsIcon
+                      icon={Queue01Icon}
+                      size={13}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={c.stop}
+                  className="size-6"
+                  aria-label="Stop"
+                  title="Stop"
+                >
+                  <HugeiconsIcon
+                    icon={StopCircleIcon}
+                    size={13}
+                    strokeWidth={1.75}
+                  />
+                </Button>
+              </div>
             ) : (
               <Button
                 type="button"

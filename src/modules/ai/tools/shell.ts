@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
+import { usePlanStore } from "../store/planStore";
 import type { ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 
@@ -38,6 +39,13 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }) => {
+        if (usePlanStore.getState().active) {
+          return {
+            error:
+              "bash commands are disabled during plan mode. Use read-only tools to investigate, then call exit_plan_mode to resume execution.",
+            denied: true,
+          };
+        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const sid = ctx.getSessionId();
@@ -75,6 +83,13 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, cwd }) => {
+        if (usePlanStore.getState().active) {
+          return {
+            error:
+              "bash commands are disabled during plan mode. Use read-only tools to investigate, then call exit_plan_mode to resume execution.",
+            denied: true,
+          };
+        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();

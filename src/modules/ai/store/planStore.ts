@@ -16,11 +16,14 @@ export type QueuedEdit = {
   description?: string;
 };
 
+type PlanSource = "user" | "agent" | null;
+
 type PlanState = {
   active: boolean;
   queue: QueuedEdit[];
+  source: PlanSource;
   toggle: () => void;
-  enable: () => void;
+  enable: (source?: "user" | "agent") => void;
   disable: () => void;
   enqueue: (q: QueuedEdit) => void;
   removeOne: (id: string) => void;
@@ -37,10 +40,15 @@ export function newQueuedEditId(): string {
 export const usePlanStore = create<PlanState>((set, get) => ({
   active: false,
   queue: [],
+  source: null,
   toggle: () =>
-    set((s) => ({ active: !s.active, queue: s.active ? [] : s.queue })),
-  enable: () => set({ active: true }),
-  disable: () => set({ active: false, queue: [] }),
+    set((s) => ({
+      active: !s.active,
+      queue: s.active ? [] : s.queue,
+      source: s.active ? null : "user",
+    })),
+  enable: (source = "user") => set({ active: true, source }),
+  disable: () => set({ active: false, queue: [], source: null }),
   enqueue: (q) => set((s) => ({ queue: [...s.queue, q] })),
   removeOne: (id) =>
     set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),

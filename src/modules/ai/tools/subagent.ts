@@ -31,6 +31,12 @@ Auto-executes (no approval).`,
                 .describe(
                   "Self-contained instruction with all context. Include file paths, what to do, and where to put output.",
                 ),
+              agentType: z
+                .enum(["coder", "architect", "reviewer", "security", "designer"])
+                .optional()
+                .describe(
+                  "Specialist persona to assign. Omit for a general-purpose subagent. Use to inject domain expertise: 'architect' for design/tradeoffs, 'coder' for implementation, 'reviewer' for code review, 'security' for threat modeling, 'designer' for UI/UX critique.",
+                ),
             }),
           )
           .describe("One or more tasks to run in parallel."),
@@ -63,6 +69,7 @@ Auto-executes (no approval).`,
           const jobId = spawnSubagent({
             prompt: t.prompt,
             description: t.description,
+            agentType: t.agentType ?? null,
             keys: apiKeys,
             modelId: resolvedModelId,
             thinkingLevel,
