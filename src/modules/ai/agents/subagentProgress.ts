@@ -259,6 +259,18 @@ export function finishSubagent(jobId: string, error?: string) {
   notify();
 }
 
+/** Seed/update progress for pipeline steps that are not local streamText jobs (e.g. ACP). */
+export function setSubagentSummary(
+  jobId: string,
+  opts: { text?: string; status?: "running" | "done" | "error"; error?: string },
+): void {
+  const s = getOrCreate(jobId);
+  if (opts.text !== undefined) s.text = opts.text;
+  if (opts.status) s.status = opts.status;
+  if (opts.error !== undefined) s.error = opts.error;
+  notify();
+}
+
 export function getSubagentState(jobId: string): SubagentStreamState | null {
   return getStore().state.get(jobId) ?? null;
 }

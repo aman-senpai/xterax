@@ -1,44 +1,52 @@
-import { streamText, stepCountIs } from "ai";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { generateText, stepCountIs, streamText } from "ai";
 import { resolveModel, selectSystemPrompt } from "../config";
-import { getAgentPrompt, getSubagentSystemPrompt } from "../lib/prompts";
 import { buildConfiguredLanguageModel } from "../lib/agent";
+import type { Agent } from "../lib/agents";
+import type { ProviderKeys } from "../lib/keyring";
+import {
+  filterToolsByAllowlist,
+  getEffectivePermissionMode,
+  resolveToolPolicy,
+} from "../lib/permissions";
+import { getAgentPrompt, getSubagentSystemPrompt } from "../lib/prompts";
 import {
   buildThinkingProviderOptions,
   type ThinkingLevel,
 } from "../lib/thinking";
-import type { ProviderKeys } from "../lib/keyring";
+import { type PermissionMode, useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
+import { buildEditTools } from "../tools/edit";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
-import { buildEditTools } from "../tools/edit";
 import { buildShellTools } from "../tools/shell";
-import { useChatStore, type PermissionMode } from "../store/chatStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
-  filterToolsByAllowlist,
-  resolveToolPolicy,
-} from "../lib/permissions";
-import {
-  pushToolStep,
-  pushToolResult,
-  pushTextDelta,
-  pushReasoningDelta,
-  pushApprovalRequired,
   finishSubagent,
+  getSubagentState,
+  pushApprovalRequired,
+  pushReasoningDelta,
+  pushTextDelta,
+  pushToolResult,
+  pushToolStep,
+  setSubagentSummary,
 } from "./subagentProgress";
 
 /** Hard cap on parallel subagent tasks per run_subagent call. */
 export const MAX_SUBAGENT_TASKS = 6;
 const SUBAGENT_MAX_STEPS = 12;
-const WAIT_TIMEOUT_MS = 120_000;
+const WAIT_TIMEOUT_MS = 180_000;
 
-/** Tools each specialist role may use (group ids + tool names). */
+/** Fallback tool allowlists when only agentType string is provided (run_subagent). */
 const ROLE_TOOL_ALLOWLIST: Record<string, string[] | null> = {
-  coder: null, // full
+  coder: null,
+  implement: null,
   architect: ["fs", "search", "todo"],
   reviewer: ["fs", "search"],
+  "review-agent": ["fs", "search"],
   security: ["fs", "search"],
   designer: ["fs", "search"],
+  design: ["fs", "search"],
+  verification: ["fs", "search", "shell", "todo"],
 };
 
 const MUTATION_TOOLS = new Set([
@@ -53,17 +61,89 @@ const MUTATION_TOOLS = new Set([
   "bash_kill",
 ]);
 
+/** How the subagent should behave. */
+export type SubagentVariant =
+  /** Default: implementer; tool-first, short summary. */
+  | "implement"
+  /** Pipeline review/design/security: investigate briefly, deliver text findings. */
+  | "analysis";
+
 type Args = {
   jobId: string;
   prompt: string;
   description?: string;
+  /** Legacy role key for run_subagent tool. */
   agentType?: string | null;
+  /** Full agent record (pipeline / customized agents). Wins over agentType. */
+  agent?: Agent | null;
+  /** Behavioral profile. Defaults to implement. */
+  variant?: SubagentVariant;
   keys: ProviderKeys;
   modelId: string;
   thinkingLevel: ThinkingLevel;
   toolContext: ToolContext;
   abortSignal?: AbortSignal;
 };
+
+const ANALYSIS_SYSTEM = `You are a specialist analysis agent in a multi-agent pipeline.
+
+Your deliverable is TEXT findings for the user and the next agent — not endless exploration.
+
+## Rules (CRITICAL)
+1. Prefer grep/glob over reading many files. Target high-signal paths first.
+2. At most 4 tool calls for investigation, then you MUST stop calling tools.
+3. Your FINAL message must be complete structured markdown findings — that is the product.
+4. Do NOT end on a tool call. After tools, write findings with headings and bullet points.
+5. Do NOT write only "Let me check…" / "I'll survey…" — those are not findings.
+6. Do NOT call write_file/edit. Analysis only.
+7. Never thrash listing the same directories. Search, read 1–3 key files, conclude.
+
+## Output format (required)
+Use markdown. Include severity/priority when reviewing. Multi-paragraph is expected.`;
+
+const ANALYSIS_MAX_STEPS = 6;
+
+/** True when text looks like real findings, not mid-investigation narration. */
+function looksLikeFindings(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 160) return false;
+  // Pure planning/narration without substance
+  if (
+    /^(i('ll| will)|let me|now i|i'm going|i am going|starting|surveying)/i.test(
+      t,
+    ) &&
+    t.length < 500 &&
+    !/\n[-*#]|\n\d+\./.test(t)
+  ) {
+    return false;
+  }
+  // Prefer structured content
+  if (/\n[-*#]|\n\d+\.|MUST|SHOULD|## |severity|recommend/i.test(t)) {
+    return true;
+  }
+  return t.length >= 400;
+}
+
+function digestToolSteps(
+  steps: Array<{ toolName: string; input: unknown; output?: unknown }>,
+): string {
+  const lines: string[] = [];
+  for (const s of steps.slice(0, 12)) {
+    const input =
+      typeof s.input === "object" && s.input
+        ? JSON.stringify(s.input).slice(0, 180)
+        : String(s.input ?? "");
+    let out = "";
+    if (s.output !== undefined) {
+      out =
+        typeof s.output === "string"
+          ? s.output.slice(0, 600)
+          : JSON.stringify(s.output).slice(0, 600);
+    }
+    lines.push(`### ${s.toolName}\ninput: ${input}\noutput: ${out}`);
+  }
+  return lines.join("\n\n") || "(no tool results)";
+}
 
 export type RunResult = {
   description?: string;
@@ -92,7 +172,16 @@ function nextJobId(): string {
   return `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-export function spawnSubagent(args: Omit<Args, "jobId" | "abortSignal">): string {
+function stripWritingMarker(text: string): string {
+  return text
+    .replace(/\n*_Writing findings[^*]*_?\s*$/gi, "")
+    .replace(/^_Writing findings[^*]*_?\s*/gi, "")
+    .trim();
+}
+
+export function spawnSubagent(
+  args: Omit<Args, "jobId" | "abortSignal">,
+): string {
   const jobId = nextJobId();
   const controller = new AbortController();
   let resolve: () => void = () => {};
@@ -131,9 +220,13 @@ export function spawnSubagent(args: Omit<Args, "jobId" | "abortSignal">): string
         toolContext: isolatedCtx,
         abortSignal: controller.signal,
       });
-      if (controller.signal.aborted) {
+      // Prefer a real summary over a late abort (e.g. timeout during synthesis).
+      const hasSummary =
+        Boolean(r.summary?.trim()) && r.summary !== "(no output)";
+      if (controller.signal.aborted && !hasSummary) {
         entry.status = "aborted";
         entry.error = "aborted";
+        entry.result = { ...r, description: args.description };
         finishSubagent(jobId, "aborted");
         return;
       }
@@ -145,9 +238,24 @@ export function spawnSubagent(args: Omit<Args, "jobId" | "abortSignal">): string
         controller.signal.aborted ||
         /abort/i.test(msg) ||
         (e instanceof Error && e.name === "AbortError");
-      entry.status = aborted ? "aborted" : "error";
-      entry.error = aborted ? "aborted" : msg;
-      finishSubagent(jobId, entry.error);
+      const partial = stripWritingMarker(
+        getSubagentState(jobId)?.text?.trim() ?? "",
+      );
+      if (partial && partial !== "(no output)") {
+        entry.status = "done";
+        entry.result = {
+          description: args.description,
+          summary: partial,
+          stepCount: 0,
+          durationMs: Date.now() - entry.startedAt,
+        };
+        finishSubagent(jobId);
+        setSubagentSummary(jobId, { status: "done", text: partial });
+      } else {
+        entry.status = aborted ? "aborted" : "error";
+        entry.error = aborted ? "aborted" : msg;
+        finishSubagent(jobId, entry.error);
+      }
     } finally {
       jobs.get(jobId)?.resolve();
     }
@@ -253,7 +361,11 @@ export async function waitForSubagents(
 
 // ---- Internal runner — mirrors main agent pipeline ----
 
-function roleAllowlist(agentType?: string | null): string[] | null {
+function roleAllowlist(
+  agent?: Agent | null,
+  agentType?: string | null,
+): string[] | null {
+  if (agent) return agent.toolAllowlist;
   if (!agentType) return null;
   return ROLE_TOOL_ALLOWLIST[agentType] ?? null;
 }
@@ -264,6 +376,7 @@ function buildSubagentToolSet(
   ctx: ToolContext,
   jobId: string,
   permissionMode: PermissionMode,
+  agent?: Agent | null,
   agentType?: string | null,
 ): Record<string, unknown> {
   const raw = {
@@ -273,8 +386,11 @@ function buildSubagentToolSet(
     ...buildShellTools(ctx),
   };
 
-  // Specialist roles get a reduced tool surface.
-  const roleFiltered = filterToolsByAllowlist(raw, roleAllowlist(agentType));
+  // Specialist roles / agent allowlists reduce the tool surface.
+  const roleFiltered = filterToolsByAllowlist(
+    raw,
+    roleAllowlist(agent, agentType),
+  );
 
   const tools: Record<string, unknown> = {};
   for (const [name, t] of Object.entries(roleFiltered)) {
@@ -339,7 +455,10 @@ function buildSubagentToolSet(
         }
         const approved = await pushApprovalRequired(jobId, idx, name, args);
         if (!approved) {
-          const denied = { denied: true, message: "User denied this tool call." };
+          const denied = {
+            denied: true,
+            message: "User denied this tool call.",
+          };
           pushToolResult(jobId, toolCallId, denied);
           return denied;
         }
@@ -353,10 +472,30 @@ function buildSubagentToolSet(
   return tools;
 }
 
+function resolveVariant(
+  variant: SubagentVariant | undefined,
+  agent?: Agent | null,
+  agentType?: string | null,
+): SubagentVariant {
+  if (variant) return variant;
+  const handle = agent?.handle ?? agentType ?? "";
+  const analysis = new Set([
+    "architect",
+    "reviewer",
+    "review-agent",
+    "security",
+    "designer",
+    "design",
+  ]);
+  return analysis.has(handle) ? "analysis" : "implement";
+}
+
 async function runSubagent({
   jobId,
   prompt,
   agentType,
+  agent,
+  variant: variantOpt,
   keys,
   modelId,
   thinkingLevel,
@@ -378,14 +517,40 @@ async function runSubagent({
 
   const info = resolveModel(modelId, prefs.customEndpoints);
   const provider = info.provider;
+  const variant = resolveVariant(variantOpt, agent, agentType);
 
-  const baseSystem = agentType
-    ? getSubagentSystemPrompt() +
+  let baseSystem: string;
+  if (variant === "analysis") {
+    const persona = agent
+      ? agent.builtIn
+        ? getAgentPrompt(agent.id.replace("builtin:", ""))
+        : agent.instructions
+      : agentType
+        ? getAgentPrompt(agentType)
+        : "";
+    baseSystem =
+      ANALYSIS_SYSTEM +
+      (persona
+        ? `\n\n## SPECIALIST ROLE — ${agent?.name ?? agentType}\n${persona}`
+        : "");
+  } else if (agent) {
+    const persona = agent.builtIn
+      ? getAgentPrompt(agent.id.replace("builtin:", ""))
+      : agent.instructions;
+    baseSystem =
+      getSubagentSystemPrompt() +
+      `\n\n## SPECIALIST AGENT — ${agent.name} (@${agent.handle})\n` +
+      persona;
+  } else if (agentType) {
+    baseSystem =
+      getSubagentSystemPrompt() +
       "\n\n## SPECIALIST ROLE — " +
       agentType +
       "\n" +
-      getAgentPrompt(agentType)
-    : selectSystemPrompt(modelId);
+      getAgentPrompt(agentType);
+  } else {
+    baseSystem = selectSystemPrompt(modelId);
+  }
 
   const providerOptions = buildThinkingProviderOptions(
     provider,
@@ -393,16 +558,21 @@ async function runSubagent({
     modelId,
   );
 
-  const permissionMode = useChatStore.getState().permissionMode;
+  const permissionMode = getEffectivePermissionMode(
+    useChatStore.getState().permissionMode,
+  );
   const tools = buildSubagentToolSet(
     toolContext,
     jobId,
     permissionMode,
+    agent,
     agentType,
   );
 
   const start = Date.now();
   let stepCount = 0;
+  const maxSteps =
+    variant === "analysis" ? ANALYSIS_MAX_STEPS : SUBAGENT_MAX_STEPS;
 
   const result = streamText({
     model,
@@ -410,7 +580,7 @@ async function runSubagent({
     prompt,
     tools: tools as Parameters<typeof streamText>[0]["tools"],
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
-    stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
+    stopWhen: stepCountIs(maxSteps),
     abortSignal,
     onChunk: (chunk) => {
       if (abortSignal?.aborted) return;
@@ -429,10 +599,77 @@ async function runSubagent({
     },
   });
 
-  const text = await result.text;
-  if (!abortSignal?.aborted) {
-    finishSubagent(jobId);
+  let text = (await result.text)?.trim() ?? "";
+  // Prefer model text; fall back to streamed progress (tool-only turns often
+  // leave result.text empty even though work completed).
+  const streamed = getSubagentState(jobId)?.text?.trim() ?? "";
+  if (!text) text = streamed;
+  text = stripWritingMarker(text);
+
+  // Analysis agents often stop after a tool call with only "Let me check…"
+  // narration. Force a no-tools conclusion pass so the pipeline has findings.
+  //
+  // Important: do NOT attach abortSignal here. A parent timeout/abort mid
+  // conclusion used to leave status=aborted with "_Writing findings…_" stuck
+  // in the card and no summary for the next agent. Conclusion is short; if the
+  // user stops the pipeline we still prefer best-effort findings over abort.
+  if (
+    variant === "analysis" &&
+    !abortSignal?.aborted &&
+    !looksLikeFindings(text)
+  ) {
+    const prog = getSubagentState(jobId);
+    const digest = digestToolSteps(prog?.steps ?? []);
+    const notesOnly = text;
+    try {
+      setSubagentSummary(jobId, {
+        status: "running",
+        text: notesOnly
+          ? `${notesOnly}\n\n_Writing findings…_`
+          : "_Writing findings from investigation…_",
+      });
+      const conclusion = await generateText({
+        model,
+        system: baseSystem,
+        prompt: [
+          "Investigation is finished. Do NOT call tools.",
+          "Write your COMPLETE structured findings for the user and next agent now.",
+          "",
+          "## Original task",
+          prompt,
+          "",
+          "## Tool results (use these)",
+          digest,
+          "",
+          notesOnly
+            ? `## Notes so far (expand into full findings; drop filler)\n${notesOnly}`
+            : "Write full findings from the tool results above.",
+        ].join("\n"),
+      });
+      const findings = conclusion.text?.trim() ?? "";
+      if (findings) text = findings;
+      else if (!text) text = digest.slice(0, 2000);
+    } catch (e) {
+      text = stripWritingMarker(text);
+      if (!looksLikeFindings(text)) {
+        const err = e instanceof Error ? e.message : String(e);
+        text = [
+          notesOnly || "Investigation finished.",
+          "",
+          `_Findings synthesis failed (${err}). Tool digest:_`,
+          "",
+          digest.slice(0, 1500),
+        ].join("\n");
+      }
+    }
   }
+
+  text = stripWritingMarker(text).trim();
+
+  // Always finalize as done when we produced a summary so the next pipeline
+  // step receives it — even if the user aborted mid-conclusion.
+  finishSubagent(jobId, text ? undefined : "no output");
+  if (text) setSubagentSummary(jobId, { status: "done", text });
 
   return {
     summary: text || "(no output)",

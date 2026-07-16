@@ -7,6 +7,7 @@ export type SettingsTab =
   | "permissions"
   | "models"
   | "agents"
+  | "workflow"
   | "prompts"
   | "mcp"
   | "acp"

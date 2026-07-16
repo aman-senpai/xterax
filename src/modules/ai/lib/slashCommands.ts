@@ -1,14 +1,8 @@
-import {
-  CheckListIcon,
-  ClaudeIcon,
-  SparklesIcon,
-} from "@hugeicons/core-free-icons";
-import { usePlanStore } from "../store/planStore";
-import {
-  getClaudeCodeDirectivePrompt,
-  getInitCommandPrompt,
-} from "./prompts";
 import type { SkillConfig } from "@/modules/skills/types";
+import { CheckListIcon, SparklesIcon } from "@hugeicons/core-free-icons";
+import { syncModeFromPlanStore } from "../store/modesStore";
+import { usePlanStore } from "../store/planStore";
+import { getInitCommandPrompt } from "./prompts";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -21,11 +15,6 @@ export type SlashOutcome =
   | { kind: "handled"; toast?: string }
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
-
-function claudeCodeDirective(request: string): string {
-  const template = getClaudeCodeDirectivePrompt();
-  return template.replace("{request}", request);
-}
 
 const INIT_PROMPT = getInitCommandPrompt();
 
@@ -48,12 +37,6 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     invocation: "/plan",
     label: "Plan mode",
     icon: CheckListIcon,
-  },
-  "claude-code": {
-    name: "claude-code",
-    invocation: "/claude-code",
-    label: "Delegate to Claude Code",
-    icon: ClaudeIcon,
   },
 };
 
@@ -88,10 +71,12 @@ export function tryRunSlashCommand(
       const store = usePlanStore.getState();
       if (tail === "off" || tail === "exit") {
         store.disable();
+        syncModeFromPlanStore(false);
         return { kind: "handled", toast: "Plan mode off" };
       }
       store.toggle();
       const nowActive = usePlanStore.getState().active;
+      syncModeFromPlanStore(nowActive);
       return {
         kind: "handled",
         toast: nowActive ? "Plan mode on" : "Plan mode off",
@@ -102,16 +87,6 @@ export function tryRunSlashCommand(
         kind: "send-prompt",
         prompt: INIT_PROMPT,
         commandName: "init",
-      };
-    }
-    case "claude-code": {
-      if (!tail) {
-        return { kind: "handled", toast: "Usage: /claude-code <request>" };
-      }
-      return {
-        kind: "send-prompt",
-        prompt: claudeCodeDirective(tail),
-        commandName: "claude-code",
       };
     }
     default: {

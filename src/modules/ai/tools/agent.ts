@@ -26,7 +26,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
   return {
     spawn_coding_agent: tool({
       description:
-        "Spawn a Claude Code agent in a new terminal tab and give it the prompt. Use this when the user (via /claude-code) wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead.",
+        "Spawn a Claude Code agent in a new terminal tab and give it the prompt. Use when the user wants work delegated to a terminal coding agent and none is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead.",
       inputSchema: z.object({
         prompt: z
           .string()
@@ -99,7 +99,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
 
     read_agent_output: tool({
       description:
-        "Inspect the Claude Code agent in this session: whether one is active, its status, and the tail of its terminal output. Call this first when handling a /claude-code request so you know whether to spawn a new agent or follow up with the existing one, and to see what it has done and reported.",
+        "Inspect the Claude Code agent in this session: whether one is active, its status, and the tail of its terminal output. Call this first when considering terminal-agent delegation so you know whether to spawn a new agent or follow up with the existing one, and to see what it has done and reported.",
       inputSchema: z.object({
         lines: z
           .number()

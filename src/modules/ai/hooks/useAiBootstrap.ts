@@ -122,6 +122,9 @@ export function useAiBootstrap(): {
     void hydrateSessions();
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
+    void import("../store/modesStore").then(({ useModesStore }) => {
+      void useModesStore.getState().hydrate();
+    });
   }, [hydrateSessions]);
 
   // Sync prompt overrides from settings → prompts module.

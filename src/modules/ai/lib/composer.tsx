@@ -1,4 +1,4 @@
-
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
@@ -6,7 +6,6 @@ import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
 
 export type FileAttachment = {
@@ -68,9 +67,8 @@ type ProviderProps = {
 
 // Module-level selector — stable reference to avoid Zustand v5
 // useSyncExternalStore consistency-check re-renders on array returns.
-const selectPendingSelections = (
-  s: ReturnType<typeof useChatStore.getState>,
-) => s.pendingSelections;
+const selectPendingSelections = (s: ReturnType<typeof useChatStore.getState>) =>
+  s.pendingSelections;
 
 export function AiComposerProvider({ children }: ProviderProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
@@ -120,9 +118,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
           if (!queued) return;
           const { beginTurnAndGetChat } = await import("../store/chatRuntime");
           const chat = beginTurnAndGetChat(sessionId);
-          void chat.sendMessage({ role: "user", parts: queued.parts } as Parameters<
-            typeof chat.sendMessage
-          >[0]);
+          void chat.sendMessage({
+            role: "user",
+            parts: queued.parts,
+          } as Parameters<typeof chat.sendMessage>[0]);
         })();
       }
     }
@@ -356,16 +355,61 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (!store.rightPanelOpen) store.openRightPanel();
 
     const session = store.sessions.find((s) => s.id === sessionId);
-    if (session?.backend === "acp" && session.acpAgentId) {
-      const textParts = parts
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join("\n\n");
-      void (async () => {
-        const { useAcpStore } = await import("@/modules/acp");
-        const { usePreferencesStore } = await import(
-          "@/modules/settings/preferences"
+
+    void (async () => {
+      const { parsePipelineProgram } = await import("./pipelineDsl");
+      const { compilePipelineProgram } = await import("./pipelineCompile");
+      const { useAgentsStore } = await import("../store/agentsStore");
+      const prefs = usePreferencesStore.getState();
+      const acpAgents = prefs.acpAgents.filter((a) => a.enabled);
+      const source = composed || effectiveText;
+      const loopOpts = prefs.pipelineLoops;
+      const program = parsePipelineProgram(source, {
+        defaultMax: loopOpts.defaultMax,
+        absoluteMax: loopOpts.absoluteMax,
+      });
+      if (program) {
+        const compiled = compilePipelineProgram(
+          program,
+          useAgentsStore.getState().all(),
+          acpAgents,
         );
+        if (compiled.error) {
+          store.patchAgentMeta({ status: "error", error: compiled.error });
+          return;
+        }
+        // Pipeline transcripts render in the local chat view.
+        if (session?.backend === "acp") {
+          store.setSessionBackend(sessionId, "local");
+        }
+        const pipelineParts: MessagePart[] = parts.map((p) => {
+          if (p.type !== "text") return p;
+          const display = p.text
+            .replace(/\[agent:([a-z][a-z0-9-]*)\]/gi, "@$1")
+            .replace(/[ \t]{2,}/g, " ")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          return {
+            type: "text",
+            text: display || program.body,
+          };
+        });
+        const { runAgentPipeline } = await import("../agents/runPipeline");
+        await runAgentPipeline({
+          sessionId,
+          compiled: compiled.program,
+          userBody: program.body,
+          userParts: pipelineParts.length > 0 ? pipelineParts : parts,
+        });
+        return;
+      }
+
+      if (session?.backend === "acp" && session.acpAgentId) {
+        const textParts = parts
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join("\n\n");
+        const { useAcpStore } = await import("@/modules/acp");
         const prefs = usePreferencesStore.getState();
         const config = prefs.acpAgents.find((a) => a.id === session.acpAgentId);
         if (!config) {
@@ -402,21 +446,20 @@ export function AiComposerProvider({ children }: ProviderProps) {
             error: e instanceof Error ? e.message : String(e),
           });
         }
-      })();
-    } else {
-      void (async () => {
-        const { beginTurnAndGetChat } = await import("../store/chatRuntime");
-        const chat = beginTurnAndGetChat(sessionId);
-        void chat.sendMessage({ role: "user", parts } as Parameters<
-          typeof chat.sendMessage
-        >[0]);
-      })();
-    }
+        return;
+      }
+
+      const { beginTurnAndGetChat } = await import("../store/chatRuntime");
+      const chat = beginTurnAndGetChat(sessionId);
+      void chat.sendMessage({ role: "user", parts } as Parameters<
+        typeof chat.sendMessage
+      >[0]);
+    })();
+
     setValue("");
     setFiles([]);
     setPickedSnippets([]);
     setPickedCommands([]);
-    // Re-focus immediately after submit so the user can type a follow-up
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
@@ -433,14 +476,15 @@ export function AiComposerProvider({ children }: ProviderProps) {
       return;
     }
     void getChat(sessionId)?.stop();
+    void import("../agents/runPipeline").then((m) => m.abortPipeline());
     void import("../agents/runSubagent").then((m) => m.abortSubagent());
   };
 
   const canSend =
-    (value.trim().length > 0 ||
-      files.length > 0 ||
-      pickedSnippets.length > 0 ||
-      pickedCommands.length > 0);
+    value.trim().length > 0 ||
+    files.length > 0 ||
+    pickedSnippets.length > 0 ||
+    pickedCommands.length > 0;
 
   const ctx: ComposerCtx = {
     textareaRef,
@@ -499,5 +543,3 @@ function readAsDataURL(file: Blob): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
-
-

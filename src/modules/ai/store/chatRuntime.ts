@@ -1,16 +1,16 @@
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { getModel, providerNeedsKey, type ModelId } from "../config";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import { getModel, type ModelId, providerNeedsKey } from "../config";
 import { BUILTIN_AGENTS } from "../lib/agents";
+import { beginTurn } from "../lib/currentTurn";
 import { getAgentPrompt } from "../lib/prompts";
-import { useAgentsStore } from "./agentsStore";
-import { usePlanStore } from "./planStore";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
+import { useAgentsStore } from "./agentsStore";
 import {
   chats,
   getActiveProviderKey,
@@ -18,7 +18,8 @@ import {
   touchChat,
   useChatStore,
 } from "./chatStore";
-import { beginTurn } from "../lib/currentTurn";
+import { getActiveMode } from "./modesStore";
+import { usePlanStore } from "./planStore";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -47,16 +48,19 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getCustomInstructions: () =>
       usePreferencesStore.getState().customInstructions,
     getAgentPersona: () => {
-      const { activeId, customAgents } = useAgentsStore.getState();
-      const all = [...BUILTIN_AGENTS, ...customAgents];
-      const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
-      // For built-in agents, resolve instructions via the prompts module so
-      // user overrides from .xterax/prompts/agent:<id>.md take effect.
-      // Custom agents keep their stored instructions as-is.
+      // Bare turns always use the unified Xterax agent. Specialists run only
+      // via @-pipeline. Mode overlays are applied separately (getModeOverlay).
+      const all = useAgentsStore.getState().all();
+      const a = all.find((x) => x.id === "builtin:xterax") ?? BUILTIN_AGENTS[0];
       const instructions = a.builtIn
-        ? getAgentPrompt(a.id.replace("builtin:", ""))
+        ? getAgentPrompt("xterax")
         : a.instructions;
       return { name: a.name, instructions };
+    },
+    getModeOverlay: () => {
+      const mode = getActiveMode();
+      if (!mode.instructions.trim()) return null;
+      return { name: mode.name, instructions: mode.instructions };
     },
     getProjectRoot: () => useChatStore.getState().live.getProjectRoot(),
     getLive: () => {

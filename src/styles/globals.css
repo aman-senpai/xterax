@@ -485,23 +485,74 @@ html *::-webkit-scrollbar {
 /*
  * AI composer placeholder.
  *
- * Do NOT use an absolute React overlay for this text: on WKWebView (Tauri
- * macOS) translucent absolute text over a translucent card double-paints
- * glyphs and looks like overlapping characters.
- *
  * data-empty is driven by React (browser :empty is unreliable once a <br>
- * is inserted). float+height:0 keeps the caret at the start without a
- * second positioned layer.
+ * is inserted). Multi-line hints use absolute positioning, never
+ * float+height:0, which paints the pseudo-element over real text and
+ * makes typed content wrap around a zero-height float.
+ *
+ * Avoid opacity on the pseudo-element: on WKWebView (Tauri macOS),
+ * translucent text over a translucent card can double-paint glyphs.
+ * color-mix keeps a single paint with muted chroma instead.
  */
+.ai-composer-editor {
+  position: relative;
+}
 .ai-composer-editor[data-empty="true"]::before {
-  content: "Ask Xterax anything\A /  skills    @  agents & files    #  snippets";
-  white-space: pre;
-  color: var(--color-muted-foreground, var(--muted-foreground));
-  opacity: 0.45;
+  content: "Ask Xterax anything\A /  skills    @  agents & files    #  snippets\A loop 3:  @coder  break if pass";
+  white-space: pre-wrap;
+  color: color-mix(
+    in oklab,
+    var(--color-muted-foreground, var(--muted-foreground)) 55%,
+    transparent
+  );
   pointer-events: none;
-  float: left;
-  height: 0;
+  position: absolute;
+  inset: 0;
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.25rem;
   -webkit-font-smoothing: antialiased;
+  z-index: 0;
+}
+
+/* Pipeline DSL keywords in the composer (live highlight when pipeline-like) */
+.ai-composer-editor .xterax-pipe-kw {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: inherit;
+  font-weight: 600;
+  border-radius: 0.2rem;
+  padding: 0 0.12em;
+  line-height: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.ai-composer-editor .xterax-pipe-kw-loop {
+  color: #a78bfa;
+  background: color-mix(in oklab, #a78bfa 14%, transparent);
+}
+.ai-composer-editor .xterax-pipe-kw-break {
+  color: #fbbf24;
+  background: color-mix(in oklab, #fbbf24 14%, transparent);
+}
+.ai-composer-editor .xterax-pipe-kw-pass {
+  color: #34d399;
+  background: color-mix(in oklab, #34d399 14%, transparent);
+}
+.ai-composer-editor .xterax-pipe-kw-fail {
+  color: #f87171;
+  background: color-mix(in oklab, #f87171 14%, transparent);
+}
+.ai-composer-editor .xterax-pipe-kw-meta {
+  color: #94a3b8;
+  background: color-mix(in oklab, #94a3b8 12%, transparent);
+}
+.ai-composer-editor .xterax-pipe-kw-op {
+  color: #38bdf8;
+  background: color-mix(in oklab, #38bdf8 12%, transparent);
+  font-weight: 700;
+}
+/* Iteration count after loop, e.g. loop 15 */
+.ai-composer-editor .xterax-pipe-kw-num {
+  color: #c4b5fd;
+  background: color-mix(in oklab, #a78bfa 18%, transparent);
+  font-variant-numeric: tabular-nums;
 }

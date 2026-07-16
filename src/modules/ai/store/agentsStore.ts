@@ -57,6 +57,14 @@ function applyOverride(agent: Agent, override?: AgentOverride): Agent {
       override.shellAllowlist !== undefined
         ? override.shellAllowlist
         : agent.shellAllowlist,
+    modelId:
+      override.modelId !== undefined ? override.modelId : agent.modelId,
+    thinkingLevel:
+      override.thinkingLevel !== undefined
+        ? override.thinkingLevel
+        : agent.thinkingLevel,
+    workflow:
+      override.workflow !== undefined ? override.workflow : agent.workflow,
   };
 }
 

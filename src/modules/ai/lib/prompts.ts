@@ -32,8 +32,6 @@ export const PromptKey = {
   AutocompleteUser: "autocomplete-user",
   /** /init slash command prompt. */
   InitCommand: "init-command",
-  /** /claude-code slash command directive template. Use {request} placeholder. */
-  ClaudeCodeDirective: "claude-code-directive",
   /** "Continue" message sent when user clicks Continue after hitting step cap. */
   ContinueMessage: "continue-message",
   /** Context elision placeholder text. */
@@ -52,6 +50,8 @@ export const PromptKey = {
   AgentSecurity: "agent:security",
   /** Built-in agent: Designer */
   AgentDesigner: "agent:designer",
+  /** Built-in agent: Verification */
+  AgentVerification: "agent:verification",
   /** Unified default agent: Xterax */
   AgentXterax: "agent:xterax",
 } as const;
@@ -140,6 +140,12 @@ export const PROMPT_META: readonly PromptMeta[] = [
     category: "Agent Persona",
   },
   {
+    key: PromptKey.AgentVerification,
+    label: "Agent: Verification",
+    description: "Instructions for the Verification agent — runs project checks, confirms work is complete, and reports failures with next steps.",
+    category: "Agent Persona",
+  },
+  {
     key: PromptKey.AgentXterax,
     label: "Agent: Xterax (Default)",
     description: "Instructions for the unified Xterax agent — plans complex tasks, delegates to specialist subagents, and executes efficiently without manual mode switching.",
@@ -167,12 +173,6 @@ export const PROMPT_META: readonly PromptMeta[] = [
     key: PromptKey.InitCommand,
     label: "/init Command Prompt",
     description: "Prompt sent when the user runs /init — instructs the agent to scan the workspace and produce XTERAX.md.",
-    category: "Commands & Messages",
-  },
-  {
-    key: PromptKey.ClaudeCodeDirective,
-    label: "/claude-code Directive",
-    description: "Meta-instruction template sent when the user runs /claude-code. Uses {request} placeholder for the user's request. Turns the agent into a Claude Code orchestrator.",
     category: "Commands & Messages",
   },
   {
@@ -403,18 +403,6 @@ const INIT_COMMAND_DEFAULT = `Scan this workspace and produce XTERAX.md at the w
 
 Use grep/glob/list_directory/read_file to explore. Cap XTERAX.md under 200 lines. Use write_file to create it (will go through normal approval).`;
 
-const CLAUDE_CODE_DIRECTIVE_DEFAULT = `The user wants to drive a Claude Code agent through you. Their request:
-
-<request>
-{request}
-</request>
-
-You are the orchestrator, not the implementer. Do not write the code yourself.
-1. Call read_agent_output to see whether a Claude Code agent is already active in this session.
-2. If none is active: turn the request into one clear, complete, self-contained prompt (state the concrete goal, relevant constraints, and what "done" looks like) and call spawn_coding_agent with it.
-3. If one is active: read its latest output, then craft a precise follow-up and call send_to_agent.
-Sharpen vague requests into precise engineering instructions; keep each agent prompt focused on one coherent unit of work.`;
-
 const CONTINUE_MESSAGE_DEFAULT =
   "Continue from where you stopped. Don't recap -- just keep going.";
 
@@ -454,6 +442,13 @@ const AGENT_DESIGNER_DEFAULT = `You are a senior product designer with a strong 
 - Propose concrete changes, with Tailwind/CSS values when helpful. Keep consistent with the surrounding design system.
 - Avoid generic "make it pop" advice. Be specific about what's wrong and why.`;
 
+const AGENT_VERIFICATION_DEFAULT = `You are a verification engineer. Your job is to prove the work is done correctly.
+- Identify the project's real check commands (type-check, lint, test, build) from the repo or XTERAX.md / package scripts.
+- Run the relevant checks. Do not invent green results — only report what the tools output.
+- If checks fail: isolate the failure, fix only what is needed to pass (or report a clear blocker), re-run.
+- If checks pass: state what ran and the outcome in one short summary. No fluff.
+- Prefer the smallest verification scope that still covers the change.`;
+
 const AGENT_XTERAX_DEFAULT = `You are Xterax, a unified AI software engineering agent with full tool access. You handle everything without manual mode switching — you decide how to approach each task.
 
 ## Task triage (CRITICAL — read these)
@@ -467,7 +462,7 @@ Before acting, assess the task:
 → Call \`enter_plan_mode\`. Investigate with read-only tools. Present a concrete plan. After the user approves queued edits, call \`exit_plan_mode\` and execute.
 
 **Complex multi-domain** (frontend + backend + design + security review):
-→ Call \`enter_plan_mode\`. Research all affected areas. Then delegate specialist work via \`run_subagent\` with \`agentType\` set to the right specialist ("architect", "coder", "reviewer", "security", "designer"). Synthesize findings. Present plan.
+→ Call \`enter_plan_mode\`. Research all affected areas. Then delegate specialist work via \`run_subagent\` with the right specialist handles. Synthesize findings. Present plan.
 
 ## Plan mode (when \`enter_plan_mode\` is active)
 - Use read-only tools only: read_file, list_directory, grep, glob, get_terminal_output.
@@ -477,13 +472,16 @@ Before acting, assess the task:
 - Present a clear summary of findings and queued edits. The user will review and approve.
 - After approval, call \`exit_plan_mode\` and apply changes.
 
-## Specialist delegation
-\`run_subagent\` accepts an optional \`agentType\` parameter. Use it to assign domain expertise:
+## Specialist agents
+Users can also \`@mention\` agents in chat (e.g. \`@architect @coder @verification\`) to run an ordered pipeline — that path is host-driven, not your tool call.
+
+\`run_subagent\` accepts an optional \`agentType\` for parallel fan-out you control:
 - \`"architect"\` — design decisions, tradeoff analysis, system structure
-- \`"coder"\` — implementation, refactoring, bug fixes
-- \`"reviewer"\` — code review for correctness, perf, security
+- \`"coder"\` / \`"implement"\` — implementation, refactoring, bug fixes
+- \`"reviewer"\` / \`"review-agent"\` — code review for correctness, perf, security
 - \`"security"\` — threat modeling, vulnerability scanning
-- \`"designer"\` — UI/UX critique, visual refinement
+- \`"designer"\` / \`"design"\` — UI/UX critique, visual refinement
+- \`"verification"\` — run checks and confirm done
 
 When delegating, provide full context in each task prompt. Subagents have no memory of your conversation. Batch all tasks into ONE \`run_subagent\` call so they run in parallel. Synthesize their results into your final response.
 
@@ -518,7 +516,6 @@ const DEFAULTS: Record<PromptKey, string> = {
   [PromptKey.AutocompleteSystem]: AUTOCOMPLETE_SYSTEM_DEFAULT,
   [PromptKey.AutocompleteUser]: AUTOCOMPLETE_USER_DEFAULT,
   [PromptKey.InitCommand]: INIT_COMMAND_DEFAULT,
-  [PromptKey.ClaudeCodeDirective]: CLAUDE_CODE_DIRECTIVE_DEFAULT,
   [PromptKey.ContinueMessage]: CONTINUE_MESSAGE_DEFAULT,
   [PromptKey.ElisionText]: ELISION_TEXT_DEFAULT,
   [PromptKey.SkillsPreamble]: SKILLS_PREAMBLE_DEFAULT,
@@ -527,6 +524,7 @@ const DEFAULTS: Record<PromptKey, string> = {
   [PromptKey.AgentReviewer]: AGENT_REVIEWER_DEFAULT,
   [PromptKey.AgentSecurity]: AGENT_SECURITY_DEFAULT,
   [PromptKey.AgentDesigner]: AGENT_DESIGNER_DEFAULT,
+  [PromptKey.AgentVerification]: AGENT_VERIFICATION_DEFAULT,
   [PromptKey.AgentXterax]: AGENT_XTERAX_DEFAULT,
 };
 
@@ -623,8 +621,6 @@ export const getAutocompleteSystemPrompt = () =>
 export const getAutocompleteUserPrompt = () =>
   getPrompt(PromptKey.AutocompleteUser);
 export const getInitCommandPrompt = () => getPrompt(PromptKey.InitCommand);
-export const getClaudeCodeDirectivePrompt = () =>
-  getPrompt(PromptKey.ClaudeCodeDirective);
 export const getContinueMessage = () => getPrompt(PromptKey.ContinueMessage);
 export const getElisionText = () => getPrompt(PromptKey.ElisionText);
 

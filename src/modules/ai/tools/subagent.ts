@@ -38,14 +38,18 @@ Asks for user approval when spawning more than one subagent.`,
               agentType: z
                 .enum([
                   "coder",
+                  "implement",
                   "architect",
                   "reviewer",
+                  "review-agent",
                   "security",
                   "designer",
+                  "design",
+                  "verification",
                 ])
                 .optional()
                 .describe(
-                  "Specialist persona to assign. Omit for a general-purpose subagent. Use to inject domain expertise: 'architect' for design/tradeoffs, 'coder' for implementation, 'reviewer' for code review, 'security' for threat modeling, 'designer' for UI/UX critique.",
+                  "Specialist persona to assign. Omit for a general-purpose subagent. Handles: architect, coder/implement, reviewer/review-agent, security, designer/design, verification.",
                 ),
             }),
           )

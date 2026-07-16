@@ -5,10 +5,10 @@ import {
   type ToolApprovalPolicy,
   type ToolPermissions,
 } from "@/modules/settings/store";
-import type { PermissionMode } from "../store/chatStore";
-import { TOOL_GROUPS, type Agent } from "./agents";
 import { useAgentsStore } from "../store/agentsStore";
-import { BUILTIN_AGENTS } from "./agents";
+import type { PermissionMode } from "../store/chatStore";
+import { getActiveMode } from "../store/modesStore";
+import { type Agent, BUILTIN_AGENTS, TOOL_GROUPS } from "./agents";
 
 export type ResolvedPolicy = "auto-approve" | "deny" | "ask";
 
@@ -113,16 +113,31 @@ export function isMcpTool(toolName: string): boolean {
   return toolName.startsWith("mcp__");
 }
 
-// ---- active agent ----------------------------------------------------------
+// ---- default agent (bare messages; specialists are @-invoked) --------------
 
+/** Default local agent for turns without an @-pipeline. Always Xterax. */
 export function getActiveAgent(): Agent | null {
   try {
-    const { activeId, all } = useAgentsStore.getState();
-    const list = all();
-    return list.find((a) => a.id === activeId) ?? BUILTIN_AGENTS[0] ?? null;
+    const list = useAgentsStore.getState().all();
+    return (
+      list.find((a) => a.id === "builtin:xterax") ?? BUILTIN_AGENTS[0] ?? null
+    );
   } catch {
-    return null;
+    return BUILTIN_AGENTS[0] ?? null;
   }
+}
+
+/** Effective permission mode: session picker, unless active mode overrides. */
+export function getEffectivePermissionMode(
+  sessionMode: PermissionMode,
+): PermissionMode {
+  try {
+    const mode = getActiveMode();
+    if (mode.permissionMode) return mode.permissionMode;
+  } catch {
+    // modes store not ready
+  }
+  return sessionMode;
 }
 
 /**
@@ -223,10 +238,7 @@ export function hasShellMetacharacters(command: string): boolean {
  * Requires an enabled global pattern match, then the agent shell allowlist
  * (when restricted) as an additional AND gate.
  */
-export function isShellAllowed(
-  command: string,
-  agent?: Agent | null,
-): boolean {
+export function isShellAllowed(command: string, agent?: Agent | null): boolean {
   const prefs = usePreferencesStore.getState();
   const globalList: ShellAllowlistEntry[] =
     prefs.permissions?.shellAllowlist ?? [];
@@ -263,10 +275,7 @@ export function matchesShellAllowlist(
   return false;
 }
 
-function matchesShellPatternList(
-  command: string,
-  patterns: string[],
-): boolean {
+function matchesShellPatternList(command: string, patterns: string[]): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
   for (const p of patterns) {
@@ -311,14 +320,25 @@ function matchSimpleGlob(str: string, pattern: string): boolean {
 }
 
 /**
- * Filter a built tool map so only tools allowed by the active agent remain.
- * Used by the main agent runner.
+ * Filter a built tool map by default agent allowlist ∩ active mode allowlist.
+ * Used by the main agent runner (not @-pipeline steps, which pass their agent).
  */
 export function applyAgentToolFilter<T extends Record<string, unknown>>(
   tools: T,
   agent?: Agent | null,
 ): T {
   const active = agent ?? getActiveAgent();
-  if (!active) return tools;
-  return filterToolsByAllowlist(tools, active.toolAllowlist);
+  let next = tools;
+  if (active) {
+    next = filterToolsByAllowlist(next, active.toolAllowlist);
+  }
+  try {
+    const mode = getActiveMode();
+    if (mode.toolAllowlist) {
+      next = filterToolsByAllowlist(next, mode.toolAllowlist);
+    }
+  } catch {
+    // modes store not ready
+  }
+  return next;
 }

@@ -157,6 +157,8 @@ type Deps = {
   getModelId: () => string;
   getCustomInstructions: () => string;
   getAgentPersona: () => { name: string; instructions: string } | null;
+  /** Active session mode overlay (Plan / Review / custom). */
+  getModeOverlay?: () => { name: string; instructions: string } | null;
   getLive: () => LiveSnapshot;
   /**
    * Stable project root — the directory Xterax was opened in. Distinct
@@ -280,6 +282,7 @@ export function createContextAwareTransport(deps: Deps) {
       modelId: deps.getModelId(),
       customInstructions: deps.getCustomInstructions(),
       agentPersona: deps.getAgentPersona(),
+      modeOverlay: deps.getModeOverlay?.() ?? null,
       toolContext: deps.toolContext,
       onStep: deps.onStep,
       onUsage: deps.onUsage,
@@ -435,10 +438,10 @@ async function loadPromptOverridesForWorkspace(
   const promptKeys = [
     "system", "system-lite", "engineering-profile", "plan-mode",
     "subagent-system", "title-generation", "autocomplete-system",
-    "autocomplete-user", "init-command", "claude-code-directive",
+    "autocomplete-user", "init-command",
     "continue-message", "elision-text",
     "agent-xterax", "agent-coder", "agent-architect", "agent-reviewer",
-    "agent-security", "agent-designer", "skills-preamble",
+    "agent-security", "agent-designer", "agent-verification", "skills-preamble",
   ];
 
   for (const key of promptKeys) {

@@ -12,18 +12,23 @@ import {
   useState,
 } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
+import { acpAgentHandle } from "../lib/agents";
 import { useChatAutocomplete } from "../lib/chatAutocomplete/useChatAutocomplete";
 import { useComposer } from "../lib/composer";
 import {
   editorToText,
   getCaretOffset,
+  handleChipArrowNav,
+  insertAgentChip,
   insertFileChip,
   insertSnippetChip,
   insertTextAtCaret,
+  refreshPipelineKeywordHighlights,
   sanitizeContentEditable,
   setCaretOffset,
   textOffsetToDom,
 } from "../lib/contenteditable";
+import { formatLoopPreset } from "../lib/pipelineDsl";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
@@ -67,12 +72,17 @@ function detectAgentTrigger(value: string, caret: number): AgentTrigger | null {
   for (let i = caret - 1; i >= 0; i--) {
     const ch = value[i];
     if (ch === "@") {
+      // Allow start of input, whitespace, or right after a chip marker `]`.
       const prev = i === 0 ? " " : value[i - 1];
-      if (!/\s/.test(prev)) return null;
+      if (i > 0 && !/\s/.test(prev) && prev !== "]") return null;
       const slice = value.slice(i + 1, caret);
+      // Only the handle token — stop if the user typed past a valid mention.
+      if (!/^[a-z0-9-]*$/i.test(slice)) return null;
       return { start: i, end: caret, query: slice.toLowerCase() };
     }
     if (/\s/.test(ch)) return null;
+    // Do not walk through chip markers ([agent:…], [@file], etc.)
+    if (!/[a-z0-9-]/i.test(ch)) return null;
   }
   return null;
 }
@@ -87,17 +97,23 @@ const selectSnippets = (s: ReturnType<typeof useSnippetsStore.getState>) =>
 const selectSkillsConfigs = (
   s: ReturnType<typeof usePreferencesStore.getState>,
 ) => s.skillsConfigs;
+const selectPipelineLoops = (
+  s: ReturnType<typeof usePreferencesStore.getState>,
+) => s.pipelineLoops;
 const selectAgentsAll = (s: ReturnType<typeof useAgentsStore.getState>) =>
   s.all();
-const selectSetActiveId = (s: ReturnType<typeof useAgentsStore.getState>) =>
-  s.setActiveId;
+const selectAcpAgents = (s: ReturnType<typeof usePreferencesStore.getState>) =>
+  s.acpAgents ?? [];
 
 export function AiComposerInput() {
   const c = useComposer();
   const snippets = useSnippetsStore(selectSnippets);
   const skillsConfigs = usePreferencesStore(selectSkillsConfigs);
+  const pipelineLoops = usePreferencesStore(selectPipelineLoops);
   const agents = useAgentsStore(selectAgentsAll);
-  const setActiveAgentId = useAgentsStore(selectSetActiveId);
+  const acpAgents = usePreferencesStore(selectAcpAgents).filter(
+    (a) => a.enabled,
+  );
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const editorRef = useRef<HTMLDivElement | null>(null);
   // Keep composer's textareaRef pointed at our editor for focus / submit.
@@ -132,18 +148,25 @@ export function AiComposerInput() {
     if (!el) return;
 
     if (c.value === "") {
-      // Always clear DOM when state is empty so the placeholder shows.
-      // Browsers re-insert <br> nodes into focused contenteditables, so we
-      // strip them unconditionally — even when the change came from onInput.
-      while (el.firstChild) el.removeChild(el.firstChild);
+      // Always clear DOM when state is empty so the placeholder shows cleanly.
+      // Strip chips, keyword spans, ghosts, and browser-inserted <br>s.
+      // Residual nodes under data-empty cause the placeholder to paint on top
+      // of leftover text (looks like random overlapping flow).
+      el.replaceChildren();
+      el.removeAttribute("data-pipeline");
       // Restore cursor so the blinking caret stays visible.
       if (document.activeElement === el) {
         requestAnimationFrame(() => {
-          el.focus();
+          if (!editorRef.current) return;
+          // Browser may have re-inserted a <br> while focused; clear again.
+          if (editorRef.current.childNodes.length > 0) {
+            editorRef.current.replaceChildren();
+          }
+          editorRef.current.focus();
           const sel = window.getSelection();
           if (sel) {
             const r = document.createRange();
-            r.setStart(el, 0);
+            r.setStart(editorRef.current, 0);
             r.collapse(true);
             sel.removeAllRanges();
             sel.addRange(r);
@@ -154,12 +177,14 @@ export function AiComposerInput() {
       // Non-empty external change — sync DOM ← state.
       const domText = editorToText(el);
       if (domText !== c.value) {
-        while (el.firstChild) el.removeChild(el.firstChild);
-        el.appendChild(document.createTextNode(c.value));
+        el.replaceChildren(document.createTextNode(c.value));
+        refreshPipelineKeywordHighlights(el);
       }
     }
     syncing.current = false;
-    sanitizeContentEditable(el);
+    if (c.value !== "") {
+      sanitizeContentEditable(el);
+    }
 
     autoresize(el);
   }, [c.value]);
@@ -204,8 +229,8 @@ export function AiComposerInput() {
     const q = trigger.query;
 
     if (trigger.char === "#") {
-      // # shows snippets only
-      return snippets
+      // # shows snippets + saved loop presets
+      const snipItems: PickerItem[] = snippets
         .filter(
           (s) =>
             !q ||
@@ -213,7 +238,17 @@ export function AiComposerInput() {
             s.name.toLowerCase().includes(q) ||
             s.description.toLowerCase().includes(q),
         )
-        .map((snippet) => ({ kind: "snippet", snippet }));
+        .map((snippet) => ({ kind: "snippet" as const, snippet }));
+      const loopItems: PickerItem[] = (pipelineLoops.presets ?? [])
+        .filter(
+          (p) =>
+            !q ||
+            p.handle.includes(q) ||
+            p.name.toLowerCase().includes(q) ||
+            p.description.toLowerCase().includes(q),
+        )
+        .map((preset) => ({ kind: "loop" as const, preset }));
+      return [...loopItems, ...snipItems];
     }
 
     // / shows commands + enabled skills
@@ -232,7 +267,7 @@ export function AiComposerInput() {
       .map((skill) => ({ kind: "skill", skill }));
 
     return [...cmdItems, ...skillItems];
-  }, [trigger, snippets, skillsConfigs]);
+  }, [trigger, snippets, skillsConfigs, pipelineLoops.presets]);
 
   // Agent + file items for @ trigger
   const FILE_PICKER_CAP = 20;
@@ -253,21 +288,38 @@ export function AiComposerInput() {
   const filteredAgentsAndFiles = useMemo<PickerItem[]>(() => {
     if (!agentTrigger) return [];
     const q = agentTrigger.query;
-    // Files first, then agents
-    const fileItems: PickerItem[] = filteredFiles.map((f) => ({
-      kind: "file" as const,
-      filePath: f,
-    }));
+    // Local agents, then ACP, then files — order matches keyboard activeIndex
     const agentItems: PickerItem[] = agents
       .filter(
         (a) =>
           !q ||
+          a.handle.includes(q) ||
           a.name.toLowerCase().includes(q) ||
           a.description.toLowerCase().includes(q),
       )
       .map((agent) => ({ kind: "agent" as const, agent }));
-    return [...fileItems, ...agentItems];
-  }, [agentTrigger, agents, filteredFiles]);
+
+    const reserved = new Set(agents.map((a) => a.handle));
+    const acpItems: PickerItem[] = [];
+    for (const config of acpAgents) {
+      const handle = acpAgentHandle(config, reserved);
+      reserved.add(handle);
+      if (
+        !q ||
+        handle.includes(q) ||
+        config.name.toLowerCase().includes(q) ||
+        config.command.toLowerCase().includes(q)
+      ) {
+        acpItems.push({ kind: "acp", config, handle });
+      }
+    }
+
+    const fileItems: PickerItem[] = filteredFiles.map((f) => ({
+      kind: "file" as const,
+      filePath: f,
+    }));
+    return [...agentItems, ...acpItems, ...fileItems];
+  }, [agentTrigger, agents, acpAgents, filteredFiles]);
 
   const agentTriggerOpen = agentTrigger !== null;
   const snippetTriggerOpen = trigger !== null;
@@ -284,33 +336,25 @@ export function AiComposerInput() {
     const el = editorRef.current;
     if (!el) return;
 
-    if (item.kind === "agent") {
-      // Switch active agent
-      setActiveAgentId(item.agent.id);
-      // Replace @query text with nothing (clean removal)
-      if (agentTrigger) {
-        const sel = window.getSelection();
-        if (sel?.rangeCount) {
-          const r = sel.getRangeAt(0);
-          const startPos = textOffsetToDom(el, agentTrigger.start);
-          const endPos = textOffsetToDom(el, agentTrigger.end);
-          if (startPos && endPos) {
-            r.setStart(startPos.node, startPos.offset);
-            r.setEnd(endPos.node, endPos.offset);
-            r.deleteContents();
-            r.collapse(false);
-            sel.removeAllRanges();
-            sel.addRange(r);
-          }
-        }
-        syncing.current = true;
-        c.setValue(editorToText(el));
-        setAgentTrigger(null);
-      }
+    if (item.kind === "agent" || item.kind === "acp") {
+      // Insert an agent mention chip (pipeline invocation, not mode switch)
+      if (!agentTrigger) return;
+      const handle = item.kind === "agent" ? item.agent.handle : item.handle;
+      const cursorAfter = insertAgentChip(
+        el,
+        agentTrigger.start,
+        agentTrigger.end,
+        handle,
+      );
+      refreshPipelineKeywordHighlights(el);
+      syncing.current = true;
+      c.setValue(editorToText(el));
+      setAgentTrigger(null);
       setActiveIndex(0);
       requestAnimationFrame(() => {
         if (!editorRef.current) return;
         editorRef.current.focus();
+        setCaretOffset(editorRef.current, cursorAfter);
       });
       return;
     }
@@ -346,6 +390,41 @@ export function AiComposerInput() {
     if (!trigger) return;
 
     let cursorAfter = trigger.end;
+    if (item.kind === "loop") {
+      // Expand saved loop preset into full DSL text (not a chip).
+      const dsl = formatLoopPreset(
+        item.preset,
+        pipelineLoops.absoluteMax,
+      );
+      el.focus();
+      const sel = window.getSelection();
+      if (sel?.rangeCount) {
+        const r = sel.getRangeAt(0);
+        const startPos = textOffsetToDom(el, trigger.start);
+        const endPos = textOffsetToDom(el, trigger.end);
+        if (startPos && endPos) {
+          r.setStart(startPos.node, startPos.offset);
+          r.setEnd(endPos.node, endPos.offset);
+          r.deleteContents();
+          r.insertNode(document.createTextNode(dsl + "\n"));
+          r.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      }
+      cursorAfter = trigger.start + dsl.length + 1;
+      refreshPipelineKeywordHighlights(el);
+      syncing.current = true;
+      c.setValue(editorToText(el));
+      setTrigger(null);
+      setActiveIndex(0);
+      requestAnimationFrame(() => {
+        if (!editorRef.current) return;
+        editorRef.current.focus();
+        setCaretOffset(editorRef.current, cursorAfter);
+      });
+      return;
+    }
     if (item.kind === "snippet") {
       c.addSnippet(item.snippet);
       cursorAfter = insertSnippetChip(
@@ -460,7 +539,7 @@ export function AiComposerInput() {
     if (plain != null) {
       e.preventDefault();
       insertTextAtCaret(el, plain);
-      sanitizeContentEditable(el);
+      refreshPipelineKeywordHighlights(el);
       syncing.current = true;
       const text = editorToText(el);
       c.setValue(text);
@@ -547,7 +626,20 @@ export function AiComposerInput() {
               onInput={() => {
                 const el = editorRef.current;
                 if (!el) return;
-                sanitizeContentEditable(el);
+                // When the user deletes everything, drop residual markup so the
+                // placeholder does not stack on leftover keyword/ghost nodes.
+                const raw = editorToText(el);
+                if (raw.trim() === "") {
+                  el.replaceChildren();
+                  syncing.current = true;
+                  c.setValue("");
+                  cancelAutocomplete();
+                  setTrigger(null);
+                  setAgentTrigger(null);
+                  return;
+                }
+                // Highlight loop/break/pass/-> only for pipeline-like text
+                refreshPipelineKeywordHighlights(el);
                 syncing.current = true;
                 const text = editorToText(el);
                 c.setValue(text);
@@ -589,8 +681,10 @@ export function AiComposerInput() {
                         const s = textOffsetToDom(el, agentTrigger.start);
                         const en = textOffsetToDom(el, agentTrigger.end);
                         if (s && en) {
-                          r.setStart(s.node, s.offset);
-                          r.setEnd(en.node, en.offset);
+                          if (s.node === el) r.setStart(el, s.offset);
+                          else r.setStart(s.node, s.offset);
+                          if (en.node === el) r.setEnd(el, en.offset);
+                          else r.setEnd(en.node, en.offset);
                           r.deleteContents();
                           r.insertNode(document.createTextNode(" "));
                           r.collapse(false);
@@ -609,6 +703,28 @@ export function AiComposerInput() {
                     } else {
                       setTrigger(null);
                     }
+                    return;
+                  }
+                }
+                // Jump over contenteditable=false chips — native arrow nav gets
+                // stuck before/inside them and our caret map used to fling to end.
+                if (
+                  (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                  !e.shiftKey &&
+                  !e.metaKey &&
+                  !e.ctrlKey &&
+                  !e.altKey
+                ) {
+                  const el = editorRef.current;
+                  if (
+                    el &&
+                    handleChipArrowNav(
+                      el,
+                      e.key as "ArrowLeft" | "ArrowRight",
+                    )
+                  ) {
+                    e.preventDefault();
+                    updateTrigger();
                     return;
                   }
                 }
@@ -641,7 +757,7 @@ export function AiComposerInput() {
                 }
               }}
               className={cn(
-                "ai-composer-editor min-h-[3.5rem] max-h-40 w-full bg-transparent",
+                "ai-composer-editor min-h-[3.75rem] max-h-40 w-full bg-transparent",
                 "text-[13px] leading-5 text-foreground outline-none",
                 "whitespace-pre-wrap break-words overflow-y-auto",
               )}
@@ -674,7 +790,7 @@ export function AiComposerInput() {
   );
 }
 
-const AUTORESIZE_MIN = 56;
+const AUTORESIZE_MIN = 60;
 const AUTORESIZE_MAX = 160;
 
 function autoresize(el: HTMLElement | null) {

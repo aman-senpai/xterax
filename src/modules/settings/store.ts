@@ -1,26 +1,31 @@
+import type { AcpAgentConfig } from "@/modules/acp/types";
 import {
+  type AutocompleteProviderId,
+  type CustomEndpoint,
   DEFAULT_AUTOCOMPLETE_MODEL,
   DEFAULT_MODEL_ID,
   isKnownModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MLX_DEFAULT_BASE_URL,
-  OLLAMA_DEFAULT_BASE_URL,
-  migrateLegacyCompatEndpoint,
-  OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
-  type AutocompleteProviderId,
-  type CustomEndpoint,
   type ModelId,
+  migrateLegacyCompatEndpoint,
+  OLLAMA_DEFAULT_BASE_URL,
+  OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   type ProviderId,
 } from "@/modules/ai/config";
+import {
+  DEFAULT_PIPELINE_LOOP_SETTINGS,
+  normalizePipelineLoopSettings,
+  type PipelineLoopSettings,
+} from "@/modules/ai/lib/pipelineDsl";
 import {
   DEFAULT_THINKING_LEVEL,
   type ThinkingLevel,
 } from "@/modules/ai/lib/thinking";
 import type { RefinementProvider } from "@/modules/engineering-profile/types";
-import type { AcpAgentConfig } from "@/modules/acp/types";
 import type { McpServerConfig } from "@/modules/mcp/types";
-import type { SkillConfig } from "@/modules/skills/types";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import type { SkillConfig } from "@/modules/skills/types";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -84,6 +89,12 @@ export type AgentOverride = {
   toolAllowlist?: string[] | null;
   /** Glob patterns for allowed shell commands. */
   shellAllowlist?: string[];
+  /** Per-agent model id. null = use global subagent / session default. */
+  modelId?: string | null;
+  /** Per-agent thinking level. null = use global subagent / session default. */
+  thinkingLevel?: ThinkingLevel | null;
+  /** Ordered workflow of agent handles. Empty = run this agent alone. */
+  workflow?: string[];
 };
 
 export type PermissionSettings = {
@@ -149,6 +160,8 @@ export type Preferences = {
   acpAgents: AcpAgentConfig[];
   skillsConfigs: SkillConfig[];
   agentOverrides: Record<string, AgentOverride>;
+  /** Default/absolute loop caps + saved custom loop presets for the pipeline DSL. */
+  pipelineLoops: PipelineLoopSettings;
 };
 
 const STORE_PATH = "xterax-settings.json";
@@ -209,6 +222,7 @@ const KEY_MCP_SERVERS = "mcpServers";
 const KEY_ACP_AGENTS = "acpAgents";
 const KEY_SKILLS_CONFIGS = "skillsConfigs";
 const KEY_AGENT_OVERRIDES = "agentOverrides";
+const KEY_PIPELINE_LOOPS = "pipelineLoops";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -259,7 +273,13 @@ export const DEFAULT_PERMISSIONS: PermissionSettings = {
 export function mergePermissions(
   stored: PermissionSettings | null | undefined,
 ): PermissionSettings {
-  if (!stored) return { ...DEFAULT_PERMISSIONS, toolPermissions: { ...DEFAULT_PERMISSIONS.toolPermissions }, shellAllowlist: [...DEFAULT_PERMISSIONS.shellAllowlist], writableDirectories: [] };
+  if (!stored)
+    return {
+      ...DEFAULT_PERMISSIONS,
+      toolPermissions: { ...DEFAULT_PERMISSIONS.toolPermissions },
+      shellAllowlist: [...DEFAULT_PERMISSIONS.shellAllowlist],
+      writableDirectories: [],
+    };
   return {
     toolPermissions: {
       ...DEFAULT_PERMISSIONS.toolPermissions,
@@ -331,6 +351,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   acpAgents: [],
   skillsConfigs: [],
   agentOverrides: {},
+  pipelineLoops: DEFAULT_PIPELINE_LOOP_SETTINGS,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -499,8 +520,7 @@ export async function loadPreferences(): Promise<Preferences> {
     ),
     permissions: mergePermissions(get<PermissionSettings>(KEY_PERMISSIONS)),
     mcpServers:
-      get<McpServerConfig[]>(KEY_MCP_SERVERS) ??
-      DEFAULT_PREFERENCES.mcpServers,
+      get<McpServerConfig[]>(KEY_MCP_SERVERS) ?? DEFAULT_PREFERENCES.mcpServers,
     acpAgents:
       get<AcpAgentConfig[]>(KEY_ACP_AGENTS) ?? DEFAULT_PREFERENCES.acpAgents,
     skillsConfigs:
@@ -509,6 +529,10 @@ export async function loadPreferences(): Promise<Preferences> {
     agentOverrides:
       get<Record<string, AgentOverride>>(KEY_AGENT_OVERRIDES) ??
       DEFAULT_PREFERENCES.agentOverrides,
+    pipelineLoops: normalizePipelineLoopSettings(
+      get<PipelineLoopSettings>(KEY_PIPELINE_LOOPS) ??
+        DEFAULT_PREFERENCES.pipelineLoops,
+    ),
   };
 }
 
@@ -793,6 +817,12 @@ export async function setAgentOverrides(
   await writePref(KEY_AGENT_OVERRIDES, value);
 }
 
+export async function setPipelineLoops(
+  value: PipelineLoopSettings,
+): Promise<void> {
+  await writePref(KEY_PIPELINE_LOOPS, normalizePipelineLoopSettings(value));
+}
+
 export async function setShortcuts(
   value: Record<ShortcutId, KeyBinding[]> | {},
 ): Promise<void> {
@@ -866,6 +896,7 @@ export async function onPreferencesChange(
     [KEY_ACP_AGENTS]: "acpAgents",
     [KEY_SKILLS_CONFIGS]: "skillsConfigs",
     [KEY_AGENT_OVERRIDES]: "agentOverrides",
+    [KEY_PIPELINE_LOOPS]: "pipelineLoops",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

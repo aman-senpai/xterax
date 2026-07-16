@@ -323,7 +323,7 @@ function SubagentCard({
   durationMs,
   error,
   jobId,
-  prompt,
+  prompt: _prompt,
 }: {
   description: string;
   status: string;
@@ -344,147 +344,165 @@ function SubagentCard({
   durationMs?: number;
   error?: string;
   jobId?: string;
+  /** Kept for callers; task prompt is no longer dumped in the card body. */
   prompt?: string;
 }) {
+  void _prompt;
   "use no memo";
   const isRunning = status === "running";
-  const isDone = status === "done";
+  const isDone = status === "done" || status === "aborted";
+  const isError = status === "error" || (status === "aborted" && !text);
+  const findingsText = (text ?? "")
+    .replace(/\n*_Writing findings[^*]*_?\s*$/gi, "")
+    .replace(/^_Writing findings[^*]*_?\s*/gi, "")
+    .trim();
+  const hasFindings = findingsText.length > 0;
   const hasActivity =
     (reasoning && reasoning.length > 0) ||
     (steps && steps.length > 0) ||
-    (text && text.length > 0);
+    hasFindings;
   const hasPendingApproval = steps?.some((s) => s.state === "awaiting-approval");
-  const [open, setOpen] = useState(hasPendingApproval || !!error);
+  // Tools/reasoning stay collapsed by default; findings are always visible.
+  const [toolsOpen, setToolsOpen] = useState(hasPendingApproval || !!error);
 
   useEffect(() => {
-    if (hasPendingApproval || error) setOpen(true);
+    if (hasPendingApproval || error) setToolsOpen(true);
   }, [hasPendingApproval, error]);
 
   return (
-    <div>
-      {/* Header — matches tool card trigger styling */}
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        disabled={!hasActivity && !isRunning}
-        className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
-          "text-[12px] transition-colors",
-          "hover:bg-muted/60 disabled:cursor-default",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        )}
-      >
-        {isRunning ? (
-          <Spinner className="size-1.5 shrink-0" />
-        ) : (
-          <span
+    <div className="space-y-1.5">
+      <div className="rounded-md border border-border/40 bg-card/30">
+        <button
+          type="button"
+          onClick={() => setToolsOpen(!toolsOpen)}
+          disabled={!hasActivity && !isRunning}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
+            "text-[12px] transition-colors",
+            "hover:bg-muted/60 disabled:cursor-default",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          )}
+        >
+          {isRunning ? (
+            <Spinner className="size-1.5 shrink-0" />
+          ) : (
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                isError ? "bg-destructive" : "bg-emerald-500",
+              )}
+            />
+          )}
+          <HugeiconsIcon
+            icon={RobotIcon}
+            size={13}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted-foreground"
+          />
+          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+            {description}
+          </span>
+          {isRunning && steps && steps.length > 0 ? (
+            <span className="hidden min-w-0 max-w-40 shrink-0 truncate font-mono text-[10px] text-muted-foreground sm:block">
+              → {toolDisplayName(steps[steps.length - 1].toolName)}
+              {toolInputSummary(
+                steps[steps.length - 1].toolName,
+                steps[steps.length - 1].input,
+              )
+                ? ` · ${toolInputSummary(
+                    steps[steps.length - 1].toolName,
+                    steps[steps.length - 1].input,
+                  )}`
+                : ""}
+            </span>
+          ) : null}
+          {isDone && durationMs != null ? (
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+              {(durationMs / 1000).toFixed(1)}s
+            </span>
+          ) : null}
+          {error && !hasFindings ? (
+            <span className="shrink-0 text-[10px] font-medium text-destructive">
+              error
+            </span>
+          ) : null}
+          <HugeiconsIcon
+            icon={ArrowRight01Icon}
+            size={11}
+            strokeWidth={2}
             className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              isDone ? "bg-emerald-500" : "bg-destructive",
+              "shrink-0 text-muted-foreground transition-transform",
+              toolsOpen && "rotate-90",
             )}
           />
-        )}
-        <HugeiconsIcon
-          icon={RobotIcon}
-          size={13}
-          strokeWidth={1.75}
-          className="shrink-0 text-muted-foreground"
-        />
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-          {description}
-        </span>
-        {/* Latest tool call indicator — visible even when collapsed */}
-        {steps && steps.length > 0 ? (
-          <span className="hidden min-w-0 max-w-40 shrink-0 truncate font-mono text-[10px] text-muted-foreground sm:block">
-            → {toolDisplayName(steps[steps.length - 1].toolName)}
-            {toolInputSummary(
-              steps[steps.length - 1].toolName,
-              steps[steps.length - 1].input,
-            )
-              ? " · " + toolInputSummary(
-                  steps[steps.length - 1].toolName,
-                  steps[steps.length - 1].input,
-                )
-              : null}
-          </span>
+        </button>
+
+        {/* Tools / reasoning only — collapsible */}
+        {toolsOpen ? (
+          <div className="ml-3 space-y-2 border-l border-border/60 pb-2 pl-3">
+            {error && !hasFindings ? (
+              <div className="flex items-center gap-1.5 rounded bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
+                <span className="size-1 shrink-0 rounded-full bg-destructive" />
+                {error}
+              </div>
+            ) : null}
+
+            {reasoning ? (
+              <Reasoning isStreaming={isRunning} defaultOpen={false}>
+                <ReasoningTrigger />
+                <ReasoningContent>{reasoning}</ReasoningContent>
+              </Reasoning>
+            ) : null}
+
+            {steps && steps.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                  Tools ({steps.length})
+                </div>
+                {steps.map((s, si) =>
+                  s.state === "awaiting-approval" && jobId ? (
+                    <SubagentApprovalTool
+                      key={si}
+                      step={s}
+                      jobId={jobId}
+                      stepIndex={si}
+                    />
+                  ) : (
+                    <Tool
+                      key={si}
+                      toolName={s.toolName}
+                      state={stepStateToToolState(s.state)}
+                      input={s.input}
+                      output={s.output}
+                      errorText={s.errorText}
+                    />
+                  ),
+                )}
+              </div>
+            ) : null}
+          </div>
         ) : null}
-        {isDone && durationMs != null ? (
-          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-            {(durationMs / 1000).toFixed(1)}s
-          </span>
-        ) : null}
-        {error ? (
-          <span className="shrink-0 text-[10px] font-medium text-destructive">error</span>
-        ) : null}
-        <HugeiconsIcon
-          icon={ArrowRight01Icon}
-          size={11}
-          strokeWidth={2}
-          className={cn(
-            "shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-      </button>
+      </div>
 
-      {/* Expanded content — indented with border-l, matching tool card content */}
-      {open ? (
-        <div className="ml-3 space-y-2 border-l border-border/60 pb-1 pl-3">
-          {/* Error */}
-          {error ? (
-            <div className="flex items-center gap-1.5 rounded bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
-              <span className="size-1 shrink-0 rounded-full bg-destructive" />
-              {error}
-            </div>
-          ) : null}
-
-          {/* Task prompt */}
-          {prompt ? (
-            <div className="rounded-2xl rounded-br-sm bg-muted/70 px-3 py-2 text-[12px] leading-relaxed text-foreground whitespace-pre-wrap">
-              {prompt.length > 300 ? prompt.slice(0, 300) + "…" : prompt}
-            </div>
-          ) : null}
-
-          {/* Reasoning — same compound component as main chat */}
-          {reasoning ? (
-            <Reasoning isStreaming={isRunning} defaultOpen={false}>
-              <ReasoningTrigger />
-              <ReasoningContent>{reasoning}</ReasoningContent>
-            </Reasoning>
-          ) : null}
-
-          {/* Tool calls — reuse the real <Tool /> component from main chat */}
-          {steps?.map((s, si) =>
-            s.state === "awaiting-approval" && jobId ? (
-              <SubagentApprovalTool
-                key={si}
-                step={s}
-                jobId={jobId}
-                stepIndex={si}
-              />
-            ) : (
-              <Tool
-                key={si}
-                toolName={s.toolName}
-                state={stepStateToToolState(s.state)}
-                input={s.input}
-                output={s.output}
-                errorText={s.errorText}
-              />
-            ),
-          )}
-
-          {/* Text output — rendered as markdown via Streamdown */}
-          {text ? (
-            <ChatStreamingProvider value={isRunning}>
-              <Streamdown
-                className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                components={streamdownComponents}
-              >
-                {text}
-              </Streamdown>
-            </ChatStreamingProvider>
-          ) : null}
+      {/* Findings always sit between agents in the thread (not buried in expand) */}
+      {hasFindings ? (
+        <div className="rounded-md border border-sky-500/20 bg-sky-500/5 px-2.5 py-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-sky-700 uppercase dark:text-sky-400">
+            <span className="size-1 rounded-full bg-sky-500" />
+            Output · passed to next agent
+          </div>
+          <ChatStreamingProvider value={isRunning}>
+            <Streamdown
+              className="text-[12.5px] leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              components={streamdownComponents}
+            >
+              {findingsText}
+            </Streamdown>
+          </ChatStreamingProvider>
+        </div>
+      ) : isDone && !isRunning ? (
+        <div className="rounded-md border border-border/40 bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+          No findings text was produced for this step.
         </div>
       ) : null}
     </div>
@@ -535,6 +553,285 @@ function toolInputSummary(
 // outside React's prop-diffing. The React Compiler must not memoize this
 // component — it would treat every render as a no-op when props are stable
 // and skip re-renders triggered by external store changes.
+type DisplayNode =
+  | {
+      kind: "agent";
+      handle: string;
+      name: string;
+      backend: "local" | "acp";
+    }
+  | {
+      kind: "loop";
+      loopId: string;
+      max: number;
+      breakWhen: string | null;
+      body: DisplayNode[];
+    };
+
+type RunPathEntry = {
+  handle: string;
+  name: string;
+  kind: "local" | "acp";
+  loopId?: string;
+  loopIter?: number;
+  loopMax?: number;
+  status?: string;
+};
+
+type PipelineUiMeta = {
+  /** Nested program (preferred). */
+  structure?: DisplayNode[];
+  /** Flat execution path. */
+  runPath?: RunPathEntry[];
+  /** Legacy flat steps. */
+  steps?: Array<{ handle: string; name: string; kind: "local" | "acp" }>;
+  activeIndex: number;
+  breakNote?: string | null;
+};
+
+function AgentChip({
+  handle,
+  backend,
+  state,
+}: {
+  handle: string;
+  backend?: "local" | "acp";
+  state: "pending" | "active" | "done" | "error";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] font-medium",
+        state === "active" &&
+          "bg-sky-500/15 text-sky-600 ring-1 ring-sky-500/30 dark:text-sky-400",
+        state === "done" &&
+          "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        state === "error" && "bg-destructive/10 text-destructive",
+        state === "pending" && "bg-muted/50 text-muted-foreground",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          state === "active" && "animate-pulse bg-sky-500",
+          state === "done" && "bg-emerald-500",
+          state === "error" && "bg-destructive",
+          state === "pending" && "bg-muted-foreground/40",
+        )}
+      />
+      @{handle}
+      {backend === "acp" ? (
+        <span className="text-[9px] opacity-70">ACP</span>
+      ) : null}
+    </span>
+  );
+}
+
+function StructureRow({
+  nodes,
+  runPath,
+  activeIndex,
+  complete,
+}: {
+  nodes: DisplayNode[];
+  runPath: RunPathEntry[];
+  activeIndex: number;
+  complete: boolean;
+}) {
+  const active = !complete ? runPath[activeIndex] : undefined;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {nodes.map((n, i) => {
+        if (n.kind === "agent") {
+          const matches = runPath.filter((r) => r.handle === n.handle);
+          const last = matches[matches.length - 1];
+          const isActive =
+            active?.handle === n.handle &&
+            active?.loopId == null &&
+            !complete;
+          const state: "pending" | "active" | "done" | "error" = isActive
+            ? "active"
+            : last?.status === "error" || last?.status === "aborted"
+              ? "error"
+              : last?.status === "done" || complete
+                ? "done"
+                : "pending";
+          return (
+            <div key={`a-${n.handle}-${i}`} className="flex items-center gap-1">
+              {i > 0 ? (
+                <span className="px-0.5 text-[10px] text-muted-foreground/70">
+                  →
+                </span>
+              ) : null}
+              <AgentChip
+                handle={n.handle}
+                backend={n.backend}
+                state={state}
+              />
+            </div>
+          );
+        }
+
+        // Loop block
+        const loopRuns = runPath.filter((r) => r.loopId === n.loopId);
+        const maxIter = loopRuns.reduce(
+          (m, r) => Math.max(m, r.loopIter ?? 0),
+          0,
+        );
+        const inLoop =
+          !complete && active?.loopId === n.loopId;
+        return (
+          <div
+            key={n.loopId}
+            className={cn(
+              "flex flex-wrap items-center gap-1 rounded-md border px-1.5 py-1",
+              inLoop
+                ? "border-sky-500/30 bg-sky-500/5"
+                : "border-border/50 bg-muted/20",
+            )}
+          >
+            <span className="font-mono text-[9.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+              loop {n.loopId}
+              <span className="ml-1 font-normal normal-case opacity-80">
+                {maxIter > 0 ? `${maxIter}/${n.max}` : `×${n.max}`}
+                {n.breakWhen ? ` · break if ${n.breakWhen}` : ""}
+              </span>
+            </span>
+            <span className="text-[10px] text-muted-foreground/50">[</span>
+            {n.body.map((b, bi) => {
+              if (b.kind !== "agent") return null;
+              const isActive =
+                inLoop && active?.handle === b.handle;
+              const last = [...loopRuns]
+                .reverse()
+                .find((r) => r.handle === b.handle);
+              const state: "pending" | "active" | "done" | "error" = isActive
+                ? "active"
+                : last?.status === "error" || last?.status === "aborted"
+                  ? "error"
+                  : last?.status === "done" || (complete && maxIter > 0)
+                    ? "done"
+                    : "pending";
+              return (
+                <div
+                  key={`${n.loopId}-${b.handle}-${bi}`}
+                  className="flex items-center gap-1"
+                >
+                  {bi > 0 ? (
+                    <span className="text-[10px] text-muted-foreground/70">
+                      →
+                    </span>
+                  ) : null}
+                  <AgentChip
+                    handle={b.handle}
+                    backend={b.backend}
+                    state={state}
+                  />
+                </div>
+              );
+            })}
+            <span className="text-[10px] text-muted-foreground/50">]</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PipelineSequenceHeader({
+  pipeline,
+  done,
+  total,
+  complete,
+}: {
+  pipeline: PipelineUiMeta;
+  done: number;
+  total: number;
+  complete: boolean;
+}) {
+  const progressWidth = total > 0 ? (done / total) * 100 : 0;
+  const structure = pipeline.structure;
+  const runPath = pipeline.runPath ?? [];
+  const legacySteps = pipeline.steps ?? [];
+
+  return (
+    <div className="mb-1.5 rounded-lg border border-border/50 bg-card/50 px-2.5 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+          <HugeiconsIcon
+            icon={RobotIcon}
+            size={12}
+            strokeWidth={1.75}
+            className="text-muted-foreground"
+          />
+          <span>Agent pipeline</span>
+          <span className="font-normal text-muted-foreground">
+            ·{" "}
+            {complete
+              ? "complete"
+              : structure?.some((n) => n.kind === "loop")
+                ? "with loops"
+                : "sequential"}
+          </span>
+        </div>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {done}/{total || runPath.length || legacySteps.length || "?"}
+        </span>
+      </div>
+
+      <div className="mt-2">
+        {structure && structure.length > 0 ? (
+          <StructureRow
+            nodes={structure}
+            runPath={runPath}
+            activeIndex={pipeline.activeIndex}
+            complete={complete}
+          />
+        ) : (
+          <div className="flex flex-wrap items-center gap-1">
+            {legacySteps.map((s, i) => {
+              const isActive = !complete && i === pipeline.activeIndex;
+              const isDone = complete || i < done;
+              return (
+                <div key={`${s.handle}-${i}`} className="flex items-center gap-1">
+                  {i > 0 ? (
+                    <span className="px-0.5 text-[10px] text-muted-foreground/70">
+                      →
+                    </span>
+                  ) : null}
+                  <AgentChip
+                    handle={s.handle}
+                    backend={s.kind === "acp" ? "acp" : "local"}
+                    state={
+                      isActive ? "active" : isDone ? "done" : "pending"
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {pipeline.breakNote ? (
+        <div className="mt-1.5 text-[10.5px] text-amber-700 dark:text-amber-400">
+          {pipeline.breakNote}
+        </div>
+      ) : null}
+
+      {total > 0 ? (
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted/60">
+          <div
+            className="h-full rounded-full bg-emerald-500/70 transition-all duration-300"
+            style={{ width: `${progressWidth}%` }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SubagentCards({
   input,
   output,
@@ -553,11 +850,23 @@ function SubagentCards({
     getProgressVersion,
   );
 
-  const tasks = (
+  const inputObj =
     input && typeof input === "object"
-      ? (input as Record<string, unknown>).tasks
-      : null
-  ) as Array<{ description?: string; prompt?: string }> | null;
+      ? (input as Record<string, unknown>)
+      : null;
+
+  const tasks = (inputObj?.tasks ?? null) as Array<{
+    description?: string;
+    prompt?: string;
+  }> | null;
+
+  const pipeline = (inputObj?.pipeline ?? null) as PipelineUiMeta | null;
+  const pipelineTotal = pipeline
+    ? (pipeline.runPath?.length ||
+        pipeline.steps?.length ||
+        tasks?.length ||
+        0)
+    : 0;
 
   const results = (
     output && typeof output === "object"
@@ -596,16 +905,22 @@ function SubagentCards({
 
     return (
       <div className="space-y-0.5">
-        {/* Progress bar */}
-        {total > 0 ? (
+        {pipeline ? (
+          <PipelineSequenceHeader
+            pipeline={pipeline}
+            done={done}
+            total={total || pipelineTotal || 1}
+            complete={false}
+          />
+        ) : total > 0 ? (
           <div className="flex items-center gap-2 px-0.5 pb-0.5">
-            <div className="flex-1 h-1 rounded-full bg-muted/60 overflow-hidden">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/60">
               <div
                 className="h-full rounded-full bg-emerald-500/60 transition-all duration-300"
                 style={{ width: `${progressWidth}%` }}
               />
             </div>
-            <span className="shrink-0 text-[10px] font-mono text-muted-foreground tabular-nums">
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
               {done}/{total}
             </span>
           </div>
@@ -635,9 +950,19 @@ function SubagentCards({
   // Error state.
   if (state === "output-error" && !results) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
-        <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
-        <span className="text-[11px] text-destructive">Subagent error</span>
+      <div className="space-y-0.5">
+        {pipeline ? (
+          <PipelineSequenceHeader
+            pipeline={pipeline}
+            done={0}
+            total={pipelineTotal || 1}
+            complete={false}
+          />
+        ) : null}
+        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+          <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
+          <span className="text-[11px] text-destructive">Subagent error</span>
+        </div>
       </div>
     );
   }
@@ -647,6 +972,14 @@ function SubagentCards({
     const batch = getCurrentBatch();
     return (
       <div className="space-y-0.5">
+        {pipeline ? (
+          <PipelineSequenceHeader
+            pipeline={pipeline}
+            done={results.length}
+            total={Math.max(results.length, pipelineTotal)}
+            complete={state === "output-available"}
+          />
+        ) : null}
         {results.map((r, i) => {
           const job = batch[i];
           const prog = job ? getSubagentState(job.jobId) : null;
@@ -666,6 +999,18 @@ function SubagentCards({
           );
         })}
       </div>
+    );
+  }
+
+  // Pipeline shell before first task starts.
+  if (pipeline) {
+    return (
+      <PipelineSequenceHeader
+        pipeline={pipeline}
+        done={0}
+        total={pipelineTotal || 1}
+        complete={false}
+      />
     );
   }
 

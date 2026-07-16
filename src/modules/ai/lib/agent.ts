@@ -416,6 +416,8 @@ export type RunAgentOptions = {
   modelId?: string;
   customInstructions?: string;
   agentPersona?: { name: string; instructions: string } | null;
+  /** Session mode overlay (Plan / Review / custom). */
+  modeOverlay?: { name: string; instructions: string } | null;
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
@@ -510,6 +512,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const messages: ModelMessage[] = [{ role: "system", content: stableSystem }];
   if (opts.planMode) {
     messages.push({ role: "system", content: getPlanModePrompt() });
+  } else if (opts.modeOverlay?.instructions.trim()) {
+    // Plan mode already injects its overlay via planMode; other modes
+    // (Review, custom) send their instructions here.
+    messages.push({
+      role: "system",
+      content: `## ACTIVE MODE — ${opts.modeOverlay.name}\n${opts.modeOverlay.instructions.trim()}`,
+    });
   }
   messages.push(...compactedHistory);
 

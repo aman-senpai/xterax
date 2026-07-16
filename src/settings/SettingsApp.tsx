@@ -15,6 +15,7 @@ import {
   ShieldIcon,
   TextIcon,
   UserMultiple02Icon,
+  WorkflowSquare01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -30,6 +31,7 @@ import { PromptsSection } from "./sections/PromptsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { SkillsSection } from "./sections/SkillsSection";
 import { ThemesSection } from "./sections/ThemesSection";
+import { WorkflowSection } from "./sections/WorkflowSection";
 
 const TABS: {
   id: SettingsTab;
@@ -67,6 +69,12 @@ const TABS: {
     label: "Agents",
     icon: UserMultiple02Icon,
     component: AgentsSection,
+  },
+  {
+    id: "workflow",
+    label: "Workflow",
+    icon: WorkflowSquare01Icon,
+    component: WorkflowSection,
   },
   {
     id: "prompts",
@@ -107,6 +115,7 @@ const VALID_TABS: SettingsTab[] = [
   "permissions",
   "models",
   "agents",
+  "workflow",
   "prompts",
   "mcp",
   "acp",
@@ -118,8 +127,9 @@ function readInitialTab(): SettingsTab {
   if (typeof window === "undefined") return "general";
   const url = new URL(window.location.href);
   const t = url.searchParams.get("tab");
-  // Back-compat: legacy "ai" / "connections" → "models".
+  // Back-compat: legacy "ai" / "connections" → "models"; "help" → "workflow".
   if (t === "ai" || t === "connections") return "models";
+  if (t === "help") return "workflow";
   if (t && (VALID_TABS as string[]).includes(t)) return t as SettingsTab;
   return "general";
 }
@@ -137,6 +147,10 @@ export function SettingsApp() {
     const apply = (detail: string) => {
       if (detail === "ai" || detail === "connections") {
         setActive("models");
+        return;
+      }
+      if (detail === "help") {
+        setActive("workflow");
         return;
       }
       if ((VALID_TABS as string[]).includes(detail)) {

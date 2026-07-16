@@ -16,16 +16,33 @@ vi.mock("../store/agentsStore", () => ({
         {
           id: "builtin:xterax",
           name: "Xterax",
+          handle: "xterax",
           description: "",
           instructions: "",
           icon: "spark",
           builtIn: true,
           toolAllowlist: null,
           shellAllowlist: ["*"],
+          workflow: [],
+          modelId: null,
+          thinkingLevel: null,
         },
       ],
     }),
   },
+}));
+
+vi.mock("../store/modesStore", () => ({
+  getActiveMode: () => ({
+    id: "builtin:default",
+    name: "Default",
+    description: "",
+    instructions: "",
+    toolAllowlist: null,
+    enablePlanMode: false,
+    permissionMode: null,
+    builtIn: true,
+  }),
 }));
 
 import {
@@ -64,12 +81,16 @@ function setPerms(partial: {
 const freeAgent: Agent = {
   id: "a",
   name: "A",
+  handle: "a",
   description: "",
   instructions: "",
   icon: "spark",
   builtIn: false,
   toolAllowlist: null,
   shellAllowlist: ["*"],
+  workflow: [],
+  modelId: null,
+  thinkingLevel: null,
 };
 
 describe("matchShellAllowlistPattern", () => {

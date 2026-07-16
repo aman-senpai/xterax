@@ -11,29 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
-  BUILTIN_AGENTS,
-  TOOL_GROUPS,
-  builtinAgentPromptKey,
   type Agent,
   type AgentIconId,
+  BUILTIN_AGENTS,
+  builtinAgentPromptKey,
+  isValidHandle as isValidAgentHandle,
+  slugifyHandle,
+  TOOL_GROUPS,
 } from "@/modules/ai/lib/agents";
-import {
-  isValidHandle,
-  normalizeHandle,
-  type Snippet,
-} from "@/modules/ai/lib/snippets";
-import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
-import {
-  newSnippetId,
-  useSnippetsStore,
-} from "@/modules/ai/store/snippetsStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import {
-  setAgentOverrides,
-  setCustomInstructions,
-  setPromptOverrides,
-  type AgentOverride,
-} from "@/modules/settings/store";
 import {
   clearOverride,
   getDefaultPrompt,
@@ -41,8 +26,25 @@ import {
   setOverride,
 } from "@/modules/ai/lib/prompts";
 import {
+  isValidHandle,
+  normalizeHandle,
+  type Snippet,
+} from "@/modules/ai/lib/snippets";
+import { THINKING_LEVELS, type ThinkingLevel } from "@/modules/ai/lib/thinking";
+import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
+import {
+  newSnippetId,
+  useSnippetsStore,
+} from "@/modules/ai/store/snippetsStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import {
+  type AgentOverride,
+  setAgentOverrides,
+  setCustomInstructions,
+  setPromptOverrides,
+} from "@/modules/settings/store";
+import {
   Add01Icon,
-  CheckmarkCircle02Icon,
   Delete02Icon,
   Edit02Icon,
   SparklesIcon,
@@ -57,6 +59,7 @@ const ICON_OPTIONS: AgentIconId[] = [
   "reviewer",
   "security",
   "designer",
+  "verification",
   "spark",
 ];
 
@@ -70,13 +73,8 @@ const selectPromptOverrides = (
 const selectAgentOverrides = (
   s: ReturnType<typeof usePreferencesStore.getState>,
 ) => s.agentOverrides;
-const selectCustomAgents = (
-  s: ReturnType<typeof useAgentsStore.getState>,
-) => s.customAgents;
-const selectActiveAgentId = (s: ReturnType<typeof useAgentsStore.getState>) =>
-  s.activeId;
-const selectSetActiveId = (s: ReturnType<typeof useAgentsStore.getState>) =>
-  s.setActiveId;
+const selectCustomAgents = (s: ReturnType<typeof useAgentsStore.getState>) =>
+  s.customAgents;
 const selectUpsertAgent = (s: ReturnType<typeof useAgentsStore.getState>) =>
   s.upsert;
 const selectRemoveAgent = (s: ReturnType<typeof useAgentsStore.getState>) =>
@@ -103,8 +101,6 @@ export function AgentsSection() {
   const agentOverrides = usePreferencesStore(selectAgentOverrides);
 
   const customAgents = useAgentsStore(selectCustomAgents);
-  const activeAgentId = useAgentsStore(selectActiveAgentId);
-  const setActiveAgentId = useAgentsStore(selectSetActiveId);
   const upsertAgent = useAgentsStore(selectUpsertAgent);
   const removeAgent = useAgentsStore(selectRemoveAgent);
   const hydrateAgents = useAgentsStore(selectHydrateAgents);
@@ -132,8 +128,19 @@ export function AgentsSection() {
       agentOverrides[a.id]?.toolAllowlist !== undefined
         ? agentOverrides[a.id].toolAllowlist!
         : a.toolAllowlist,
-    shellAllowlist:
-      agentOverrides[a.id]?.shellAllowlist ?? a.shellAllowlist,
+    shellAllowlist: agentOverrides[a.id]?.shellAllowlist ?? a.shellAllowlist,
+    modelId:
+      agentOverrides[a.id]?.modelId !== undefined
+        ? agentOverrides[a.id].modelId!
+        : a.modelId,
+    thinkingLevel:
+      agentOverrides[a.id]?.thinkingLevel !== undefined
+        ? agentOverrides[a.id].thinkingLevel!
+        : a.thinkingLevel,
+    workflow:
+      agentOverrides[a.id]?.workflow !== undefined
+        ? agentOverrides[a.id].workflow!
+        : a.workflow,
   }));
 
   const handleSaveBuiltin = useCallback(
@@ -142,7 +149,6 @@ export function AgentsSection() {
       const defaultPrompt = getDefaultPrompt(key);
       const ao: AgentOverride = {};
 
-      // Instructions: store in both promptOverrides and agentOverrides
       if (
         agent.instructions.trim() !== defaultPrompt.trim() &&
         agent.instructions.trim() !== ""
@@ -154,30 +160,32 @@ export function AgentsSection() {
         clearOverride(key);
       }
 
-      // Tool allowlist
       if (agent.toolAllowlist !== null) {
         ao.toolAllowlist = agent.toolAllowlist;
       } else {
         ao.toolAllowlist = null;
       }
 
-      // Shell allowlist
       ao.shellAllowlist = agent.shellAllowlist;
+      ao.modelId = agent.modelId;
+      ao.thinkingLevel = agent.thinkingLevel;
+      ao.workflow = agent.workflow;
 
-      // Persist agentOverrides
       const next = { ...agentOverrides };
-      if (
+      const hasOverride =
         ao.instructions !== undefined ||
         ao.toolAllowlist !== null ||
-        (ao.shellAllowlist && ao.shellAllowlist.length > 0)
-      ) {
+        (ao.shellAllowlist && ao.shellAllowlist.length > 0) ||
+        ao.modelId != null ||
+        ao.thinkingLevel != null ||
+        (ao.workflow && ao.workflow.length > 0);
+      if (hasOverride) {
         next[agent.id] = ao;
       } else {
         delete next[agent.id];
       }
       void setAgentOverrides(next);
 
-      // Sync promptOverrides (remove agent key if reset to default)
       const nextPrompts = { ...promptOverrides };
       if (ao.instructions) {
         nextPrompts[key] = ao.instructions;
@@ -193,7 +201,7 @@ export function AgentsSection() {
     <div className="flex flex-col gap-7">
       <SectionHeader
         title="Agents"
-        description="Configure AI personas with custom instructions, tool permissions, and shell allowlists. Switch agents from the input bar or type @ in chat."
+        description="Specialist agents invoked with @handle in chat. Order of mentions is run order. Each agent can set its own model, thinking level, tools, and optional workflow."
       />
 
       <CustomInstructionsBlock value={customInstructions} />
@@ -210,12 +218,16 @@ export function AgentsSection() {
               setEditingAgent({
                 id: newAgentId(),
                 name: "New agent",
+                handle: "new-agent",
                 description: "",
                 instructions: "",
                 icon: "spark",
                 builtIn: false,
                 toolAllowlist: null,
                 shellAllowlist: [],
+                workflow: [],
+                modelId: null,
+                thinkingLevel: null,
               })
             }
           >
@@ -228,10 +240,7 @@ export function AgentsSection() {
             <AgentCard
               key={a.id}
               agent={a}
-              active={a.id === activeAgentId}
-              onActivate={() => setActiveAgentId(a.id)}
               onEdit={() => {
-                // For built-in agents, set up the editing agent with current override values
                 if (a.builtIn) {
                   const ao = agentOverrides[a.id];
                   setEditingAgent({
@@ -244,6 +253,12 @@ export function AgentsSection() {
                         ? ao.toolAllowlist
                         : a.toolAllowlist,
                     shellAllowlist: ao?.shellAllowlist ?? a.shellAllowlist,
+                    modelId: ao?.modelId !== undefined ? ao.modelId : a.modelId,
+                    thinkingLevel:
+                      ao?.thinkingLevel !== undefined
+                        ? ao.thinkingLevel
+                        : a.thinkingLevel,
+                    workflow: ao?.workflow ?? a.workflow,
                   });
                 } else {
                   setEditingAgent(a);
@@ -377,27 +392,16 @@ export function AgentsSection() {
 
 function AgentCard({
   agent,
-  active,
-  onActivate,
   onEdit,
   onDelete,
 }: {
   agent: Agent;
-  active: boolean;
-  onActivate: () => void;
   onEdit: () => void;
   onDelete: (() => void) | null;
 }) {
   const Icon = AGENT_ICONS[agent.icon] ?? SparklesIcon;
   return (
-    <div
-      className={cn(
-        "group relative flex flex-col gap-1.5 rounded-lg border bg-card/60 px-3 py-2.5 transition-colors",
-        active
-          ? "border-foreground/30 ring-1 ring-foreground/10"
-          : "border-border/60 hover:border-border",
-      )}
-    >
+    <div className="group relative flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5 transition-colors hover:border-border">
       <div className="flex items-start gap-2">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
           <HugeiconsIcon icon={Icon} size={14} strokeWidth={1.5} />
@@ -405,6 +409,9 @@ function AgentCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-center gap-1.5 text-[12.5px] font-medium">
             {agent.name}
+            <code className="rounded bg-muted/50 px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+              @{agent.handle}
+            </code>
             {agent.builtIn ? (
               <span className="rounded bg-muted/50 px-1 py-0.5 text-[9px] tracking-wide text-muted-foreground uppercase">
                 Built-in
@@ -414,28 +421,24 @@ function AgentCard({
           <span className="line-clamp-2 text-[10.5px] leading-relaxed text-muted-foreground">
             {agent.description}
           </span>
+          {(agent.modelId ||
+            agent.thinkingLevel ||
+            (agent.workflow && agent.workflow.length > 0)) && (
+            <span className="mt-0.5 text-[10px] text-muted-foreground/80">
+              {[
+                agent.modelId ? `model: ${agent.modelId}` : null,
+                agent.thinkingLevel ? `think: ${agent.thinkingLevel}` : null,
+                agent.workflow?.length
+                  ? `workflow: ${agent.workflow.map((h) => `@${h}`).join(" → ")}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          )}
         </div>
       </div>
-      <div className="mt-0.5 flex items-center justify-between gap-1">
-        <Button
-          size="sm"
-          variant={active ? "default" : "outline"}
-          onClick={onActivate}
-          className="h-6 gap-1 px-2 text-[10.5px]"
-        >
-          {active ? (
-            <>
-              <HugeiconsIcon
-                icon={CheckmarkCircle02Icon}
-                size={10}
-                strokeWidth={2}
-              />
-              Active
-            </>
-          ) : (
-            "Use agent"
-          )}
-        </Button>
+      <div className="mt-0.5 flex items-center justify-end gap-1">
         <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <Button
             size="icon"
@@ -483,7 +486,8 @@ function AgentEditorDialog({
   if (!draft) return null;
 
   const isNew = !existing.some((a) => a.id === draft.id) && !draft.builtIn;
-  const canSave = draft.name.trim().length > 0;
+  const handleOk = draft.builtIn || isValidAgentHandle(draft.handle);
+  const canSave = draft.name.trim().length > 0 && handleOk;
 
   // Normalize: treat undefined toolAllowlist as null (all allowed)
   const normalizedAllowlist: string[] | null =
@@ -511,7 +515,10 @@ function AgentEditorDialog({
     } else {
       const list = normalizedAllowlist;
       if (list.includes(groupId)) {
-        setDraft({ ...draft, toolAllowlist: list.filter((g) => g !== groupId) });
+        setDraft({
+          ...draft,
+          toolAllowlist: list.filter((g) => g !== groupId),
+        });
       } else {
         setDraft({ ...draft, toolAllowlist: [...list, groupId] });
       }
@@ -584,12 +591,43 @@ function AgentEditorDialog({
               <Label>Name</Label>
               <Input
                 value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const next = { ...draft, name };
+                  if (
+                    !draft.builtIn &&
+                    (!draft.handle || draft.handle === "new-agent")
+                  ) {
+                    next.handle = slugifyHandle(name) || draft.handle;
+                  }
+                  setDraft(next);
+                }}
                 className="h-8 text-[12px]"
                 placeholder="e.g. Test Engineer"
                 disabled={draft.builtIn}
               />
             </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label>@ Handle</Label>
+            <Input
+              value={draft.handle}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  handle: e.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-]/g, ""),
+                })
+              }
+              placeholder="architect"
+              className="h-8 font-mono text-[12px]"
+              disabled={draft.builtIn}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              Invoke with @{draft.handle || "handle"} in chat. Mentions run in
+              the order written.
+            </span>
           </div>
           <div className="flex flex-col gap-1">
             <Label>Description</Label>
@@ -604,6 +642,67 @@ function AgentEditorDialog({
             />
           </div>
 
+          {/* Model + thinking */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <Label>Model (optional)</Label>
+              <Input
+                value={draft.modelId ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    modelId: e.target.value.trim() || null,
+                  })
+                }
+                placeholder="Default subagent model"
+                className="h-8 font-mono text-[11px]"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Thinking (optional)</Label>
+              <select
+                value={draft.thinkingLevel ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDraft({
+                    ...draft,
+                    thinkingLevel: (v || null) as ThinkingLevel | null,
+                  });
+                }}
+                className="h-8 rounded-md border border-border/60 bg-background px-2 text-[12px]"
+              >
+                <option value="">Session / subagent default</option>
+                {THINKING_LEVELS.map((l) => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Workflow */}
+          <div className="flex flex-col gap-1">
+            <Label>Workflow (optional)</Label>
+            <Input
+              value={(draft.workflow ?? []).join(", ")}
+              onChange={(e) => {
+                const workflow = e.target.value
+                  .split(/[,\s]+/)
+                  .map((s) => s.replace(/^@/, "").trim())
+                  .filter(Boolean);
+                setDraft({ ...draft, workflow });
+              }}
+              placeholder="architect, claude-code, verification"
+              className="h-8 font-mono text-[11px]"
+            />
+            <span className="text-[10px] text-muted-foreground">
+              Comma-separated handles (local or ACP agents from Settings). When
+              this agent is @mentioned, expand to that sequence instead of
+              running alone.
+            </span>
+          </div>
+
           {/* Instructions */}
           <div className="flex flex-col gap-1">
             <Label>Instructions</Label>
@@ -612,7 +711,7 @@ function AgentEditorDialog({
               onChange={(e) =>
                 setDraft({ ...draft, instructions: e.target.value })
               }
-              placeholder="Persona & rules. Appended to Xterax's core system prompt."
+              placeholder="Persona and rules for this agent."
               className="min-h-32 resize-y text-[12px] leading-relaxed"
             />
             {draft.builtIn && (
@@ -628,8 +727,8 @@ function AgentEditorDialog({
               <div className="flex flex-col gap-0.5">
                 <span className="text-[12px] font-medium">Tool Allowlist</span>
                 <span className="text-[10px] text-muted-foreground">
-                  Tool groups this agent can use. Unchecked tools are hidden from
-                  the model.
+                  Tool groups this agent can use. Unchecked tools are hidden
+                  from the model.
                 </span>
               </div>
               <Button

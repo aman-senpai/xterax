@@ -194,9 +194,16 @@ export function AiChatView({
 }: Props) {
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
-  const showSpinner = isBusy && lastMessage?.role === "user";
+  const agentMetaStatus = useChatStore((s) => s.agentMeta.status);
+  const pipelineBusy =
+    agentMetaStatus === "thinking" || agentMetaStatus === "streaming";
+  // Pipeline runs update messages outside Chat status — still show progress.
+  const showSpinner =
+    (isBusy && lastMessage?.role === "user") ||
+    (pipelineBusy && !isBusy && lastMessage?.role === "user");
   const streamingMessageId =
-    status === "streaming" && lastMessage?.role === "assistant"
+    (status === "streaming" || pipelineBusy) &&
+    lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
   const step = useChatStore((s) => s.agentMeta.step);
@@ -627,7 +634,7 @@ const RenderedMessage = memo(function RenderedMessage({
             ) : null}
             {stripped.text ? (
               <p className="whitespace-pre-wrap wrap-break-word">
-                {stripped.text}
+                {renderTextWithAgentMentions(stripped.text)}
               </p>
             ) : null}
           </MessageContent>
@@ -700,6 +707,31 @@ const RenderedMessage = memo(function RenderedMessage({
 type Group =
   | { kind: "single"; part: AnyPart; idx: number; key: string }
   | { kind: "reads"; parts: AnyPart[]; key: string };
+
+/** Highlight @agent handles in user bubbles (same chip look as the composer). */
+function renderTextWithAgentMentions(text: string): React.ReactNode {
+  const re = /@([a-z][a-z0-9-]*)/gi;
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      nodes.push(text.slice(last, m.index));
+    }
+    nodes.push(
+      <span
+        key={`m-${key++}`}
+        className="mx-0.5 inline-flex items-center rounded bg-sky-500/15 px-1 py-px align-baseline font-mono text-[0.92em] font-medium text-sky-600 dark:text-sky-400"
+      >
+        @{m[1]}
+      </span>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes.length > 0 ? nodes : text;
+}
 
 function partType(p: AnyPart): string {
   return (p as { type?: string }).type ?? "";
