@@ -32,6 +32,8 @@ import {
   resolveApproval,
 } from "@/modules/ai/agents/subagentProgress";
 import { AiToolApproval } from "@/modules/ai/components/AiToolApproval";
+import { TodoWriteCard } from "@/modules/ai/components/TodoList";
+import { todosFingerprint } from "@/modules/ai/lib/todos";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
@@ -153,16 +155,15 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
   errorText?: string;
 };
 
-// Tools whose `input` carries large/streaming content (file bodies, sub-
-// agent prompts, todo lists). The AI diff tab is the canonical place to
-// view file changes; for the rest, the header summary + final output is
-// enough. Re-rendering streamed input on every token both stalls the UI
-// and duplicates information.
+// Tools whose `input` carries large/streaming content (file bodies).
+// The AI diff tab is the canonical place to view file changes; header
+// summary + final output is enough. Re-rendering streamed input on every
+// token both stalls the UI and duplicates information.
+// todo_write is handled separately via TodoWriteCard (not heavy).
 const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "edit",
   "multi_edit",
-  "todo_write",
 ]);
 
 const ToolImpl = ({
@@ -192,6 +193,12 @@ const ToolImpl = ({
   // Subagents render as standalone task cards — no collapsible wrapper.
   if (toolName === "run_subagent") {
     return <SubagentCards input={input} output={output} state={state} />;
+  }
+
+  // Todos: compact chip while active (live list is TodoStrip); full
+  // checklist in-thread once every item is completed so the strip can detach.
+  if (toolName === "todo_write") {
+    return <TodoWriteCard input={input} state={state} />;
   }
 
   return (
@@ -670,6 +677,9 @@ export const Tool = memo(ToolImpl, (a, b) => {
   if (a.errorText !== b.errorText) return false;
   if (a.output !== b.output) return false;
   if (a.className !== b.className) return false;
+  if (a.toolName === "todo_write") {
+    return todosFingerprint(a.input) === todosFingerprint(b.input);
+  }
   if (HEAVY_CONTENT_TOOLS.has(a.toolName)) {
     return deriveSummary(a.toolName, a.input) ===
       deriveSummary(b.toolName, b.input);
