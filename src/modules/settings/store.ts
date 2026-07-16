@@ -17,6 +17,7 @@ import {
   type ThinkingLevel,
 } from "@/modules/ai/lib/thinking";
 import type { RefinementProvider } from "@/modules/engineering-profile/types";
+import type { AcpAgentConfig } from "@/modules/acp/types";
 import type { McpServerConfig } from "@/modules/mcp/types";
 import type { SkillConfig } from "@/modules/skills/types";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
@@ -145,6 +146,7 @@ export type Preferences = {
   editorAutoSaveDelay: number;
   permissions: PermissionSettings;
   mcpServers: McpServerConfig[];
+  acpAgents: AcpAgentConfig[];
   skillsConfigs: SkillConfig[];
   agentOverrides: Record<string, AgentOverride>;
 };
@@ -204,6 +206,7 @@ const KEY_EDITOR_AUTO_SAVE = "editorAutoSave";
 const KEY_EDITOR_AUTO_SAVE_DELAY = "editorAutoSaveDelay";
 const KEY_PERMISSIONS = "permissions";
 const KEY_MCP_SERVERS = "mcpServers";
+const KEY_ACP_AGENTS = "acpAgents";
 const KEY_SKILLS_CONFIGS = "skillsConfigs";
 const KEY_AGENT_OVERRIDES = "agentOverrides";
 
@@ -325,6 +328,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorAutoSaveDelay: 1000,
   permissions: DEFAULT_PERMISSIONS,
   mcpServers: [],
+  acpAgents: [],
   skillsConfigs: [],
   agentOverrides: {},
 };
@@ -497,6 +501,8 @@ export async function loadPreferences(): Promise<Preferences> {
     mcpServers:
       get<McpServerConfig[]>(KEY_MCP_SERVERS) ??
       DEFAULT_PREFERENCES.mcpServers,
+    acpAgents:
+      get<AcpAgentConfig[]>(KEY_ACP_AGENTS) ?? DEFAULT_PREFERENCES.acpAgents,
     skillsConfigs:
       get<SkillConfig[]>(KEY_SKILLS_CONFIGS) ??
       DEFAULT_PREFERENCES.skillsConfigs,
@@ -773,6 +779,10 @@ export async function setMcpServers(value: McpServerConfig[]): Promise<void> {
   await writePref(KEY_MCP_SERVERS, value);
 }
 
+export async function setAcpAgents(value: AcpAgentConfig[]): Promise<void> {
+  await writePref(KEY_ACP_AGENTS, value);
+}
+
 export async function setSkillsConfigs(value: SkillConfig[]): Promise<void> {
   await writePref(KEY_SKILLS_CONFIGS, value);
 }
@@ -853,6 +863,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_AUTO_SAVE_DELAY]: "editorAutoSaveDelay",
     [KEY_PERMISSIONS]: "permissions",
     [KEY_MCP_SERVERS]: "mcpServers",
+    [KEY_ACP_AGENTS]: "acpAgents",
     [KEY_SKILLS_CONFIGS]: "skillsConfigs",
     [KEY_AGENT_OVERRIDES]: "agentOverrides",
   };

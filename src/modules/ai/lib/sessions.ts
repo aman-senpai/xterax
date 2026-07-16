@@ -4,11 +4,17 @@ import type { CustomEndpoint } from "../config";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import { getTitleGenerationPrompt } from "./prompts";
 
+export type SessionBackend = "local" | "acp";
+
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Chat runtime backend. Omitted / undefined means local (AI SDK). */
+  backend?: SessionBackend;
+  /** Configured ACP agent id when backend is "acp". */
+  acpAgentId?: string;
 };
 
 const STORE_PATH = "xterax-sessions.json";

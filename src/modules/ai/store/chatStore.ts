@@ -157,7 +157,16 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   hydrateSessions: () => Promise<void>;
-  newSession: () => string;
+  newSession: (opts?: {
+    backend?: "local" | "acp";
+    acpAgentId?: string;
+  }) => string;
+  /** Mark the active (or given) session as local or ACP-backed. */
+  setSessionBackend: (
+    id: string,
+    backend: "local" | "acp",
+    acpAgentId?: string | null,
+  ) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -353,7 +362,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     });
   },
 
-  newSession: () => {
+  newSession: (opts) => {
     const id = newSessionId();
     titleGenAttempted.delete(id);
     const meta: SessionMeta = {
@@ -361,12 +370,30 @@ export const useChatStore = create<StoreState>((set, get) => ({
       title: "New chat",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      backend: opts?.backend ?? "local",
+      acpAgentId: opts?.acpAgentId,
     };
     const next = [meta, ...get().sessions];
     set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
     void saveSessionsList(next);
     void saveActiveId(id);
     return id;
+  },
+
+  setSessionBackend: (id, backend, acpAgentId) => {
+    const sessions = get().sessions.map((s) =>
+      s.id === id
+        ? {
+            ...s,
+            backend,
+            acpAgentId:
+              backend === "acp" ? (acpAgentId ?? s.acpAgentId) : undefined,
+            updatedAt: Date.now(),
+          }
+        : s,
+    );
+    set({ sessions });
+    void saveSessionsList(sessions);
   },
 
   switchSession: (id) => {

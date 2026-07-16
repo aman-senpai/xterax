@@ -43,6 +43,8 @@ import { useChatStore } from "../store/chatStore";
 import { useMutationStore } from "../store/mutationStore";
 import { usePlanStore } from "../store/planStore";
 import { useQueueStore } from "../store/queueStore";
+import { AcpChatView } from "./AcpChatView";
+import { AcpSessionControls } from "./AcpSessionControls";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { AiComposerInput } from "./AiComposerInput";
@@ -160,11 +162,13 @@ function Body({ sessionId }: { sessionId: string }) {
   const historyOpen = useChatStore(selectHistoryOpen);
   const toggleHistory = useChatStore(selectToggleHistory);
 
-  const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const helpers = useChat<UIMessage>({ chat });
-
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const activeTitle = active?.title || "New chat";
+  const isAcp = active?.backend === "acp";
+
+  // Always keep a Chat instance for hooks stability; ignored while ACP is active.
+  const alwaysChat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
+  const helpers = useChat<UIMessage>({ chat: alwaysChat });
 
   return (
     <>
@@ -193,12 +197,16 @@ function Body({ sessionId }: { sessionId: string }) {
         />
       ) : (
         <>
-          <PlanModeStrip />
-          <RestoreStrip sessionId={sessionId} />
-          <QueueStrip sessionId={sessionId} />
+          {!isAcp ? <PlanModeStrip /> : null}
+          {!isAcp ? <RestoreStrip sessionId={sessionId} /> : null}
+          {!isAcp ? <QueueStrip sessionId={sessionId} /> : null}
 
           <div className="flex min-h-0 flex-1 flex-col">
-            {helpers.messages.length === 0 ? (
+            {isAcp ? (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
+                <AcpChatView sessionId={sessionId} />
+              </div>
+            ) : helpers.messages.length === 0 ? (
               <EmptyState onPick={focusInput} />
             ) : (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
@@ -214,7 +222,7 @@ function Body({ sessionId }: { sessionId: string }) {
             )}
           </div>
 
-          <TodoStrip sessionId={sessionId} />
+          {!isAcp ? <TodoStrip sessionId={sessionId} /> : null}
 
           <div className="shrink-0 border-t border-border/60 bg-card px-3 py-2.5">
             <input
@@ -243,13 +251,21 @@ function Body({ sessionId }: { sessionId: string }) {
                   <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
                 </Button>
                 <div className="shrink-0">
-                  <ContextIndicator messages={helpers.messages} />
+                  {!isAcp ? (
+                    <ContextIndicator messages={helpers.messages} />
+                  ) : null}
                 </div>
                 <AgentSwitcher className="min-w-0 max-w-[7.5rem]" />
                 <span className="min-w-2 flex-1" aria-hidden />
                 <div className="flex shrink-0 items-center gap-0.5">
-                  <ThinkingModeDropdown compact />
-                  <ModelDropdown compact />
+                  {isAcp ? (
+                    <AcpSessionControls sessionId={sessionId} />
+                  ) : (
+                    <>
+                      <ThinkingModeDropdown compact />
+                      <ModelDropdown compact />
+                    </>
+                  )}
                   {c.voice.supported && c.voice.hasKey && (
                     <Button
                       type="button"

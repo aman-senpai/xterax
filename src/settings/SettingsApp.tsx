@@ -10,6 +10,7 @@ import {
   McpServerIcon,
   PaintBoardIcon,
   PuzzleIcon,
+  RobotIcon,
   Settings01Icon,
   ShieldIcon,
   TextIcon,
@@ -19,6 +20,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type JSX, useEffect, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
+import { AcpSection } from "./sections/AcpSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { GeneralSection } from "./sections/GeneralSection";
 import { McpSection } from "./sections/McpSection";
@@ -79,6 +81,12 @@ const TABS: {
     component: McpSection,
   },
   {
+    id: "acp",
+    label: "ACP",
+    icon: RobotIcon,
+    component: AcpSection,
+  },
+  {
     id: "skills",
     label: "Skills",
     icon: PuzzleIcon,
@@ -101,6 +109,7 @@ const VALID_TABS: SettingsTab[] = [
   "agents",
   "prompts",
   "mcp",
+  "acp",
   "skills",
   "about",
 ];

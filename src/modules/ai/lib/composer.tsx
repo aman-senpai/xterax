@@ -354,13 +354,64 @@ export function AiComposerProvider({ children }: ProviderProps) {
     const store = useChatStore.getState();
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     if (!store.rightPanelOpen) store.openRightPanel();
-    void (async () => {
-      const { beginTurnAndGetChat } = await import("../store/chatRuntime");
-      const chat = beginTurnAndGetChat(sessionId);
-      void chat.sendMessage({ role: "user", parts } as Parameters<
-        typeof chat.sendMessage
-      >[0]);
-    })();
+
+    const session = store.sessions.find((s) => s.id === sessionId);
+    if (session?.backend === "acp" && session.acpAgentId) {
+      const textParts = parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join("\n\n");
+      void (async () => {
+        const { useAcpStore } = await import("@/modules/acp");
+        const { usePreferencesStore } = await import(
+          "@/modules/settings/preferences"
+        );
+        const prefs = usePreferencesStore.getState();
+        const config = prefs.acpAgents.find((a) => a.id === session.acpAgentId);
+        if (!config) {
+          store.patchAgentMeta({
+            status: "error",
+            error: "ACP agent config not found",
+          });
+          return;
+        }
+        const cwd =
+          store.live.getWorkspaceRoot() ||
+          store.live.getProjectRoot() ||
+          store.live.getCwd();
+        if (!cwd) {
+          store.patchAgentMeta({
+            status: "error",
+            error: "No workspace directory for ACP session",
+          });
+          return;
+        }
+        store.patchAgentMeta({ status: "streaming", error: null });
+        try {
+          await useAcpStore.getState().ensureSession({
+            chatSessionId: sessionId,
+            config,
+            cwd,
+            mcpServers: prefs.mcpServers,
+          });
+          await useAcpStore.getState().sendPrompt(sessionId, textParts);
+          store.patchAgentMeta({ status: "idle" });
+        } catch (e) {
+          store.patchAgentMeta({
+            status: "error",
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+    } else {
+      void (async () => {
+        const { beginTurnAndGetChat } = await import("../store/chatRuntime");
+        const chat = beginTurnAndGetChat(sessionId);
+        void chat.sendMessage({ role: "user", parts } as Parameters<
+          typeof chat.sendMessage
+        >[0]);
+      })();
+    }
     setValue("");
     setFiles([]);
     setPickedSnippets([]);
@@ -371,6 +422,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const stop = () => {
     if (!sessionId) return;
+    const session = useChatStore
+      .getState()
+      .sessions.find((s) => s.id === sessionId);
+    if (session?.backend === "acp") {
+      void import("@/modules/acp").then(({ useAcpStore }) => {
+        void useAcpStore.getState().cancel(sessionId);
+      });
+      useChatStore.getState().patchAgentMeta({ status: "idle" });
+      return;
+    }
     void getChat(sessionId)?.stop();
     void import("../agents/runSubagent").then((m) => m.abortSubagent());
   };

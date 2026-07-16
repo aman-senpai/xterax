@@ -9,6 +9,7 @@ export type SettingsTab =
   | "agents"
   | "prompts"
   | "mcp"
+  | "acp"
   | "skills"
   | "about";
 
