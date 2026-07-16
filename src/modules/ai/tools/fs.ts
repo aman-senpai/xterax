@@ -7,6 +7,7 @@ import {
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { useMutationStore } from "../store/mutationStore";
+import { getActiveTurnId } from "../lib/currentTurn";
 import { resolvePath, type ToolContext } from "./context";
 
 const READ_BYTE_CAP = 25 * 1024;
@@ -204,6 +205,7 @@ export function buildFsTools(ctx: ToolContext) {
               originalContent: original,
               newContent: content,
               isNewFile,
+              turnId: getActiveTurnId(sessionId),
             });
           }
           return { path: abs, bytesWritten: content.length, ok: true };
@@ -252,6 +254,7 @@ export function buildFsTools(ctx: ToolContext) {
               originalContent: "",
               newContent: "",
               isNewFile: true,
+              turnId: getActiveTurnId(sessionId),
             });
           }
           return { path: abs, ok: true };

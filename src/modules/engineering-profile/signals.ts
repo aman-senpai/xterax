@@ -93,17 +93,22 @@ export async function recordSignal(
     await ensureBootstrap(projectRoot);
   }
   await storage.appendSignal(signal);
-  void notifyLearningAgent(signal);
+  scheduleLearningAgentNotify(signal);
   return { signal, accepted: true };
 }
 
-function notifyLearningAgent(signal: Signal): void {
-  void import("./learningAgent").then((m) => {
-    try {
-      m.notifySignalRecorded(signal);
-    } catch (err) {
-      console.warn("[engineering-profile] learning agent notify failed:", err);
-    }
+function scheduleLearningAgentNotify(signal: Signal): void {
+  // Dynamic import avoids a signals ↔ learningAgent circular dependency.
+  // Queue as a microtask so appendSignal completes before maybeRefine runs
+  // in the same transport turn, but still before the macrotask boundary.
+  queueMicrotask(() => {
+    void import("./learningAgent").then((m) => {
+      try {
+        m.notifySignalRecorded(signal);
+      } catch (err) {
+        console.warn("[engineering-profile] learning agent notify failed:", err);
+      }
+    });
   });
 }
 

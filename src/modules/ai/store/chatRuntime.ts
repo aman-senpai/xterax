@@ -18,6 +18,7 @@ import {
   touchChat,
   useChatStore,
 } from "./chatStore";
+import { beginTurn } from "../lib/currentTurn";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -149,7 +150,19 @@ export async function sendMessage(text: string): Promise<boolean> {
     !getActiveProviderKey()
   )
     return false;
+
+  // Stamp a turn id before send so tools can correlate mutations; the bridge
+  // consumes it when the chat goes idle (see beginTurn / consumeFinishedTurn).
+  beginTurn(sessionId);
+
   const c = getOrCreateChat(sessionId);
   await c.sendMessage({ text });
   return true;
+}
+
+/** Begin a turn and return the chat, for callers that send structured parts
+ *  (composer submit, queue drain) instead of plain text. */
+export function beginTurnAndGetChat(sessionId: string): Chat<UIMessage> {
+  beginTurn(sessionId);
+  return getOrCreateChat(sessionId);
 }

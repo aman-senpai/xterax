@@ -348,6 +348,16 @@ async function initialSweep(): Promise<void> {
   }
 }
 
+async function hasUnprocessedSignals(): Promise<boolean> {
+  const activeRoot = projectRoot ?? getAnchoredProjectRoot();
+  const cutoff = state.lastRefineAt;
+  const userSignals = await storage.loadSignals("user", null);
+  const projectSignals = activeRoot
+    ? await storage.loadSignals("project", activeRoot)
+    : [];
+  return [...userSignals, ...projectSignals].some((s) => s.timestamp > cutoff);
+}
+
 async function maybeRefine(
   trigger:
     | "signal"
@@ -361,7 +371,11 @@ async function maybeRefine(
   const now = Date.now();
   if (state.status === "refining" || state.status === "writing") return;
   if (now - state.lastRefineAt < MIN_REFINEMENT_INTERVAL_MS) return;
-  if (state.signalsSinceLastRefine === 0 && trigger !== "initial-sweep") return;
+  if (trigger !== "initial-sweep") {
+    const pending =
+      state.signalsSinceLastRefine > 0 || (await hasUnprocessedSignals());
+    if (!pending) return;
+  }
   await runRefinePass(trigger);
 }
 
@@ -382,8 +396,6 @@ async function runRefinePass(trigger: string): Promise<void> {
   const lockScope: Scope = projectScope ? "project" : "user";
   const lockRoot = projectScope?.projectRoot ?? null;
   if (!acquireRefineLock(lockScope, lockRoot)) return;
-  // Counter reflects queued work; clear it once a pass actually starts.
-  state.signalsSinceLastRefine = 0;
   setState({
     status: "observing",
     lastSummary: `Triggered by ${trigger}`,
@@ -411,6 +423,7 @@ async function runRefinePass(trigger: string): Promise<void> {
     setState({ status: "writing", lastSummary: "Writing profile.md" });
     state.lastRefineAt = Date.now();
     state.totalRefinements++;
+    state.signalsSinceLastRefine = 0;
     setState({
       status: "idle",
       lastSummary: `Refined ${last.added.length} added, ${last.removed.length} removed, ${last.modified.length} modified in ${Date.now() - t0}ms`,

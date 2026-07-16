@@ -220,6 +220,9 @@ export function createContextAwareTransport(deps: Deps) {
       await ensureBootstrap(projectRoot).catch(() => {});
     }
     await observeLatestUserMessage(options.messages, projectRoot);
+    // Yield one microtask so recordSignal → notifySignalRecorded can run
+    // before refinement (signals.ts schedules via queueMicrotask).
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     if (projectRoot) notifyUserMessageSent(projectRoot);
 
     // Discover agent skills (cached per workspace root).

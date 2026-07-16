@@ -52,7 +52,13 @@ const SPECIALIST_IDS = new Set([
 
 const DEFAULT_AGENT_ID = "builtin:xterax";
 
-export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
+export function AgentSwitcher({
+  isMiniWindow,
+  className,
+}: {
+  isMiniWindow?: boolean;
+  className?: string;
+}) {
   const customAgents = useAgentsStore(selectCustomAgents);
   const activeId = useAgentsStore(selectActiveId);
   const setActiveId = useAgentsStore(selectSetActiveId);
@@ -76,15 +82,21 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
           variant="outline"
           className={cn(
             !isMiniWindow
-              ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground min-w-0 overflow-hidden"
+              ? "flex h-6 max-w-full items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground min-w-0 overflow-hidden"
               : "text-xs mr-1",
+            className,
           )}
           title={`Agent: ${active.name}${isDefault ? " (Default)" : ""}`}
         >
-          <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
+          <HugeiconsIcon
+            icon={ActiveIcon}
+            size={11}
+            strokeWidth={1.75}
+            className="shrink-0"
+          />
           <span className="min-w-0 truncate">{active.name}</span>
           {isDefault && (
-            <span className="text-[9px] text-amber-500/80 ml-0.5 shrink-0">
+            <span className="ml-0.5 shrink-0 text-[9px] text-amber-500/80">
               ★
             </span>
           )}
@@ -92,7 +104,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
             icon={ArrowDown01Icon}
             size={10}
             strokeWidth={2}
-            className="opacity-70"
+            className="shrink-0 opacity-70"
           />
         </Button>
       </DropdownMenuTrigger>

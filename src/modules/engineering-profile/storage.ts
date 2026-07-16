@@ -103,8 +103,14 @@ function projectSnapshotsKey(root: string): string {
   return `${KEY_PROJECT_SNAPSHOTS_PREFIX}${projectKey(root)}`;
 }
 
+/** True when running under Vitest. Safe to call in browser/Tauri runtimes
+ *  where `process` is not a global. */
+export function isVitest(): boolean {
+  return typeof process !== "undefined" && !!process.env.VITEST;
+}
+
 export async function projectMirrorExists(projectRoot: string): Promise<boolean> {
-  if (process.env.VITEST) return true; // tests manage their own data/mocks
+  if (isVitest()) return true; // tests manage their own data/mocks
   if (!projectRoot) return false;
   const mdPath = `${projectRoot.replace(/\/$/, "")}/.xterax/profile.md`;
   try {
@@ -116,7 +122,7 @@ export async function projectMirrorExists(projectRoot: string): Promise<boolean>
 }
 
 export async function clearProjectData(projectRoot: string): Promise<void> {
-  if (process.env.VITEST) return;
+  if (isVitest()) return;
   if (!projectRoot) return;
   const pkey = projectProfileKey(projectRoot);
   const skey = projectSignalsKey(projectRoot);

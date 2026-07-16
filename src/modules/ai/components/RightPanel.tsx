@@ -221,25 +221,26 @@ function Body({ sessionId }: { sessionId: string }) {
           }}
         />
         <AiComposerInput />
-        <div className="mt-1.5 flex items-center justify-between gap-1.5 min-w-0 w-full">
-          <div className="flex min-w-0 items-center gap-1.5 shrink">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              title="Attach file or image"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={c.isBusy}
-              className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
-            >
-              <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-            </Button>
+        <div className="mt-1.5 flex min-w-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="Attach file or image"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={c.isBusy}
+            className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
+          >
+            <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+          </Button>
+          <div className="shrink-0">
             <ContextIndicator messages={helpers.messages} />
-            <AgentSwitcher />
           </div>
-          <div className="flex min-w-0 items-center gap-1 shrink ml-auto">
-            <ThinkingModeDropdown />
-            <ModelDropdown />
+          <AgentSwitcher className="min-w-0 max-w-[6.5rem] shrink" />
+          <span className="min-w-1 flex-1" aria-hidden />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <ThinkingModeDropdown compact />
+            <ModelDropdown compact />
           </div>
         </div>
       </div>
@@ -590,7 +591,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
 
   return (
     <Context usedTokens={used} maxTokens={max} modelId={modelId}>
-      <ContextTrigger className="h-6 gap-1 px-0 text-[10.5px]" />
+      <ContextTrigger className="h-6 shrink-0 gap-0.5 px-0 text-[10.5px]" />
       <ContextContent className="w-64 text-[11px]">
         <ContextContentHeader />
         <ContextContentBody>

@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { useChatStore } from "../store/chatStore";
 import { sendMessage } from "../store/chatRuntime";
 import { useRewindStore } from "../store/rewindStore";
+import { useMutationStore } from "../store/mutationStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -430,23 +431,27 @@ const RewindButton = memo(function RewindButton({
 }: {
   messageIndex: number;
 }) {
-  const [confirm, setConfirm] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "confirm" | "rewinding">("idle");
   const tRef = useRef<number>(0);
 
   useEffect(() => () => window.clearTimeout(tRef.current), []);
 
-  const onRewind = (e: React.MouseEvent) => {
+  const onRewind = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm) {
-      setConfirm(true);
-      tRef.current = window.setTimeout(() => setConfirm(false), 3000);
+    if (phase === "rewinding") return;
+    if (phase === "idle") {
+      setPhase("confirm");
+      tRef.current = window.setTimeout(() => setPhase("idle"), 3000);
       return;
     }
+    // phase === "confirm"
     const sessionId = useChatStore.getState().activeSessionId;
     if (!sessionId) return;
-    useRewindStore.getState().rewind(sessionId, messageIndex);
-    setConfirm(false);
-  };
+    setPhase("rewinding");
+    void useRewindStore.getState().rewind(sessionId, messageIndex).finally(() => {
+      setPhase("idle");
+    });
+  }, [phase, messageIndex]);
 
   return (
     <Button
@@ -454,16 +459,120 @@ const RewindButton = memo(function RewindButton({
       size="icon-xs"
       variant="ghost"
       onClick={onRewind}
+      disabled={phase === "rewinding"}
       className={cn(
         "size-6 rounded-md transition-colors",
-        confirm
+        phase === "confirm"
           ? "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20"
-          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+          : phase === "rewinding"
+            ? "text-amber-500/60"
+            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
       )}
-      aria-label={confirm ? "Click again to confirm rewind" : "Rewind to here"}
-      title={confirm ? "Click again to confirm rewind" : "Rewind to here"}
+      aria-label={
+        phase === "rewinding"
+          ? "Rewinding…"
+          : phase === "confirm"
+            ? "Click again to confirm rewind"
+            : "Rewind to here"
+      }
+      title={
+        phase === "rewinding"
+          ? "Rewinding…"
+          : phase === "confirm"
+            ? "Click again to confirm rewind"
+            : "Rewind to here"
+      }
     >
-      <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
+      <HugeiconsIcon
+        icon={RefreshIcon}
+        size={12}
+        strokeWidth={1.75}
+        className={phase === "rewinding" ? "animate-spin" : ""}
+      />
+    </Button>
+  );
+});
+
+const RestoreMessageFilesButton = memo(function RestoreMessageFilesButton({
+  messageId,
+}: {
+  messageId: string;
+}) {
+  const [phase, setPhase] = useState<"idle" | "confirm" | "restoring">("idle");
+  const tRef = useRef<number>(0);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const count = useMutationStore((s) => {
+    if (!activeSessionId) return 0;
+    return (
+      s.bySession[activeSessionId]?.filter((m) => m.messageId === messageId)
+        .length ?? 0
+    );
+  });
+
+  useEffect(() => () => window.clearTimeout(tRef.current), []);
+
+  const onRestore = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (phase === "restoring") return;
+      if (phase === "idle") {
+        setPhase("confirm");
+        tRef.current = window.setTimeout(() => setPhase("idle"), 3000);
+        return;
+      }
+      // phase === "confirm"
+      const sessionId = useChatStore.getState().activeSessionId;
+      if (!sessionId) return;
+      setPhase("restoring");
+      void useMutationStore
+        .getState()
+        .restore(sessionId, messageId)
+        .finally(() => {
+          setPhase("idle");
+        });
+    },
+    [phase, messageId],
+  );
+
+  if (count === 0) return null;
+
+  return (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      onClick={onRestore}
+      disabled={phase === "restoring"}
+      className={cn(
+        "size-6 rounded-md gap-1 transition-colors",
+        phase === "confirm"
+          ? "bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
+          : phase === "restoring"
+            ? "text-emerald-500/60"
+            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+      )}
+      aria-label={
+        phase === "restoring"
+          ? `Restoring ${count} file(s)…`
+          : phase === "confirm"
+            ? `Click again to restore ${count} file(s)`
+            : `Restore ${count} file(s)`
+      }
+      title={
+        phase === "restoring"
+          ? `Restoring ${count} file(s)…`
+          : phase === "confirm"
+            ? `Click again to restore ${count} file(s)`
+            : `Restore ${count} file(s)`
+      }
+    >
+      <HugeiconsIcon
+        icon={RefreshIcon}
+        size={12}
+        strokeWidth={1.75}
+        className={phase === "restoring" ? "animate-spin" : ""}
+      />
+      <span className="text-[10px] font-medium">{count}</span>
     </Button>
   );
 });
@@ -580,6 +689,7 @@ const RenderedMessage = memo(function RenderedMessage({
       {assistantText && (
         <div className="mt-1 flex items-center justify-start gap-1 px-1">
           <CopyMessageButton text={assistantText} label="Copy response" />
+          <RestoreMessageFilesButton messageId={message.id} />
           <RewindButton messageIndex={messageIndex} />
         </div>
       )}

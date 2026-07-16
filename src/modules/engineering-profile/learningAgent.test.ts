@@ -126,6 +126,7 @@ vi.mock("./storage", () => {
       splitMinAverageConfidence: 0.6,
       splitMinShare: 0.25,
     }),
+    isVitest: vi.fn(() => true),
     makeBlankProfile: vi.fn(() => ({})),
     newSignalId: () => `sig-test-${++nextId}`,
     newPreferenceId: () => `pref-test-${++nextId}`,
@@ -222,6 +223,22 @@ describe("LearningAgent — autonomous continuous learning", () => {
   it("refines when notifyUserMessageSent is called after a signal burst", async () => {
     startLearningAgent("/test");
     notifySignalRecorded(makeSignal({ id: "s1" }));
+    notifyUserMessageSent("/test");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(refineProfileMock).toHaveBeenCalled();
+  });
+
+  it("refines on user message even when the signal counter race leaves signalsSinceLastRefine at 0", async () => {
+    startLearningAgent("/test");
+    signals.push(
+      makeSignal({
+        id: "s-race",
+        timestamp: Date.now(),
+        scope: "project",
+        projectRoot: "/test",
+      }),
+    );
+    expect(getAgentState().signalsSinceLastRefine).toBe(0);
     notifyUserMessageSent("/test");
     await new Promise((r) => setTimeout(r, 50));
     expect(refineProfileMock).toHaveBeenCalled();

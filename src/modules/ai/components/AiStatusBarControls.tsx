@@ -113,7 +113,7 @@ const selectCustomEndpoints = (
   s: ReturnType<typeof usePreferencesStore.getState>,
 ) => s.customEndpoints;
 
-export function ModelDropdown() {
+export function ModelDropdown({ compact = false }: { compact?: boolean }) {
   const selected = useChatStore(selectSelectedModelId);
   const apiKeys = useChatStore(selectApiKeys);
   const setSelected = useChatStore(selectSetSelectedModelId);
@@ -230,9 +230,10 @@ export function ModelDropdown() {
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size={compact ? "icon" : "sm"}
           className={cn(
-            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground min-w-0 overflow-hidden shrink",
+            "shrink-0 rounded-md hover:bg-accent hover:text-foreground",
+            !compact && "my-1 h-5.5 min-w-0 gap-1 overflow-hidden px-1.5 text-xs",
             currentProviderHasKey
               ? "text-muted-foreground"
               : "text-amber-600 dark:text-amber-400",
@@ -249,13 +250,19 @@ export function ModelDropdown() {
             strokeWidth={1.5}
             className="shrink-0 text-muted-foreground/70"
           />
-          <span className="min-w-0 truncate">{current.label}</span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="shrink-0 opacity-70"
-          />
+          {!compact ? (
+            <>
+              <span className="min-w-0 max-w-[7rem] truncate">
+                {current.label}
+              </span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={11}
+                strokeWidth={2}
+                className="shrink-0 opacity-70"
+              />
+            </>
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
 

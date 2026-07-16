@@ -21,7 +21,7 @@ import {
 import { getThinkingLevels, supportsThinkingLevel } from "../lib/thinking";
 import { useChatStore } from "../store/chatStore";
 
-export function ThinkingModeDropdown() {
+export function ThinkingModeDropdown({ compact = false }: { compact?: boolean }) {
   const selectedModelId = useChatStore((s) => s.selectedModelId);
   const level = useChatStore((s) => s.thinkingLevel);
   const setLevel = useChatStore((s) => s.setThinkingLevel);
@@ -45,10 +45,13 @@ export function ThinkingModeDropdown() {
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size={compact ? "icon" : "sm"}
           disabled={!canThink}
           className={cn(
-            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground min-w-0 overflow-hidden shrink",
+            "shrink-0 rounded-md hover:bg-accent hover:text-foreground",
+            compact
+              ? "size-6"
+              : "my-1 h-5.5 min-w-0 gap-1 overflow-hidden px-1.5 text-xs",
             canThink
               ? level === "off"
                 ? "text-muted-foreground/50"
@@ -67,13 +70,17 @@ export function ThinkingModeDropdown() {
             strokeWidth={1.5}
             className="shrink-0 text-muted-foreground/70"
           />
-          <span className="min-w-0 truncate">{current.label}</span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="shrink-0 opacity-70"
-          />
+          {!compact ? (
+            <>
+              <span className="min-w-0 truncate">{current.label}</span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={11}
+                strokeWidth={2}
+                className="shrink-0 opacity-70"
+              />
+            </>
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
 

@@ -15,17 +15,36 @@ export type FileMutation = {
   isNewFile: boolean;
   /** Unix timestamp of the mutation. */
   at: number;
+  /** Turn id assigned at record time; later mapped to an assistant message id. */
+  turnId: string | null;
+  /** The assistant message id that produced this mutation (set after turn completes). */
+  messageId: string | null;
 };
 
 type MutationState = {
   /** Mutations keyed by session ID. */
   bySession: Record<string, FileMutation[]>;
 
-  record: (m: Omit<FileMutation, "id" | "at">) => void;
-  /** Revert all mutations for a session in reverse order. */
-  restore: (sessionId: string) => Promise<{ ok: number; failed: number }>;
-  /** Get mutations for a session. */
-  getForSession: (sessionId: string) => FileMutation[];
+  record: (m: Omit<FileMutation, "id" | "at" | "messageId">) => void;
+
+  /** After a turn completes, associate all mutations with the given turnId
+   *  to the assistant message id. */
+  assignMessageId: (
+    sessionId: string,
+    turnId: string,
+    messageId: string,
+  ) => void;
+
+  /** Revert file mutations for a specific assistant message (reverse order).
+   *  Pass only sessionId to revert ALL mutations for the session. */
+  restore: (
+    sessionId: string,
+    messageId?: string,
+  ) => Promise<{ ok: number; failed: number }>;
+
+  /** Get mutations for a session, optionally filtered by message id. */
+  getForSession: (sessionId: string, messageId?: string) => FileMutation[];
+
   /** Clear mutations for a session. */
   clear: (sessionId: string) => void;
 };
@@ -39,32 +58,59 @@ export const useMutationStore = create<MutationState>((set, get) => ({
   bySession: {},
 
   record: (m) => {
-    const entry: FileMutation = { ...m, id: newMutationId(), at: Date.now() };
+    const entry: FileMutation = {
+      ...m,
+      id: newMutationId(),
+      at: Date.now(),
+      messageId: null,
+    };
     set((s) => {
       const list = s.bySession[m.sessionId] ?? [];
       return { bySession: { ...s.bySession, [m.sessionId]: [...list, entry] } };
     });
   },
 
-  restore: async (sessionId: string) => {
+  assignMessageId: (sessionId, turnId, messageId) => {
+    set((s) => {
+      const list = s.bySession[sessionId];
+      if (!list) return s;
+      let changed = false;
+      const next = list.map((m) => {
+        if (m.turnId === turnId && m.messageId === null) {
+          changed = true;
+          return { ...m, messageId };
+        }
+        return m;
+      });
+      if (!changed) return s;
+      return { bySession: { ...s.bySession, [sessionId]: next } };
+    });
+  },
+
+  restore: async (sessionId, messageId?) => {
     const list = get().bySession[sessionId];
     if (!list || list.length === 0) return { ok: 0, failed: 0 };
 
+    const targets = messageId
+      ? list.filter((m) => m.messageId === messageId)
+      : list;
+
+    if (targets.length === 0) return { ok: 0, failed: 0 };
+
     let ok = 0;
     let failed = 0;
+    const restoredIds = new Set<string>();
     // Reverse order: undo the last mutation first.
-    const reversed = [...list].reverse();
+    const reversed = [...targets].reverse();
 
     for (const m of reversed) {
       try {
         if (m.isNewFile || m.kind === "create_directory") {
-          // File or directory was created by the agent — delete it.
           await native.deleteEntry(m.path);
-          ok++;
-          continue;
+        } else {
+          await native.writeFile(m.path, m.originalContent);
         }
-        // Restore original content.
-        await native.writeFile(m.path, m.originalContent);
+        restoredIds.add(m.id);
         ok++;
       } catch (e) {
         console.warn(`[mutationStore] restore failed for ${m.path}:`, e);
@@ -72,19 +118,32 @@ export const useMutationStore = create<MutationState>((set, get) => ({
       }
     }
 
-    // Clear after successful restore.
-    set((s) => {
-      const next = { ...s.bySession };
-      delete next[sessionId];
-      return { bySession: next };
-    });
+    // Drop only mutations that actually restored so failed paths can retry.
+    if (restoredIds.size > 0) {
+      set((s) => {
+        const remaining = (s.bySession[sessionId] ?? []).filter(
+          (m) => !restoredIds.has(m.id),
+        );
+        const bySession = { ...s.bySession };
+        if (remaining.length === 0) {
+          delete bySession[sessionId];
+        } else {
+          bySession[sessionId] = remaining;
+        }
+        return { bySession };
+      });
+    }
 
     return { ok, failed };
   },
 
-  getForSession: (sessionId: string) => get().bySession[sessionId] ?? [],
+  getForSession: (sessionId, messageId?) => {
+    const list = get().bySession[sessionId] ?? [];
+    if (!messageId) return list;
+    return list.filter((m) => m.messageId === messageId);
+  },
 
-  clear: (sessionId: string) => {
+  clear: (sessionId) => {
     set((s) => {
       const next = { ...s.bySession };
       delete next[sessionId];

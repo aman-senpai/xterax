@@ -10,6 +10,8 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
+import { useMutationStore } from "../store/mutationStore";
+import { consumeFinishedTurn } from "../lib/currentTurn";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -88,6 +90,38 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
   useEffect(() => {
     return () => flushPersist(sessionId);
   }, [sessionId]);
+
+  // After each turn completes, correlate the finished turn id with the
+  // assistant message so per-message file restore works. consumeFinishedTurn
+  // is race-safe if the next beginTurn already parked this id in the queue.
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    // Turn just finished: transitioning from busy → idle/error.
+    if (
+      (prev === "submitted" || prev === "streaming") &&
+      status !== "submitted" &&
+      status !== "streaming"
+    ) {
+      const turnId = consumeFinishedTurn(sessionId);
+      if (!turnId) return;
+      // Find the last assistant message — its tool calls produced
+      // the mutations tagged with this turnId.
+      let lastAssistantId: string | null = null;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+          lastAssistantId = messages[i].id;
+          break;
+        }
+      }
+      if (lastAssistantId) {
+        useMutationStore
+          .getState()
+          .assignMessageId(sessionId, turnId, lastAssistantId);
+      }
+    }
+  }, [status, messages, sessionId]);
 
   const approvalsPending = useMemo(() => {
     let n = 0;

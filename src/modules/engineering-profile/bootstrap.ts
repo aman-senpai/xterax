@@ -1,5 +1,5 @@
 import { native } from "@/modules/ai/lib/native";
-import { clearProjectData, projectMirrorExists } from "./storage";
+import { clearProjectData, isVitest, projectMirrorExists } from "./storage";
 
 /**
  * Lazily creates the .xterax/ directory on first use.
@@ -35,7 +35,7 @@ export async function resetProjectStoreIfMirrorMissing(
 }
 
 export async function ensureBootstrap(workspaceRoot: string): Promise<boolean> {
-  if (process.env.VITEST) return true;
+  if (isVitest()) return true;
   await resetProjectStoreIfMirrorMissing(workspaceRoot);
   const root = `${workspaceRoot.replace(/\/$/, "")}/.xterax`;
   try {
@@ -58,7 +58,7 @@ export function bootstrapPath(workspaceRoot: string): string {
 }
 
 export async function isBootstrapped(workspaceRoot: string): Promise<boolean> {
-  if (process.env.VITEST) return true;
+  if (isVitest()) return true;
   const root = `${workspaceRoot.replace(/\/$/, "")}/.xterax`;
   try {
     const res = await native.readFile(`${root}/profile.md`);

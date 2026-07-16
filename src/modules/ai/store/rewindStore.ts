@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import {
   chats,
-  flushPersist,
-  seedMessages,
+  cancelPersist,
 } from "./chatStore";
+import { saveMessages } from "../lib/sessions";
 import type { UIMessage } from "@ai-sdk/react";
 
 type RewindState = {
@@ -12,11 +12,11 @@ type RewindState = {
   rewind: (
     sessionId: string,
     messageIndex: number,
-  ) => { ok: boolean; removed: number };
+  ) => Promise<{ ok: boolean; removed: number }>;
 };
 
 export const useRewindStore = create<RewindState>(() => ({
-  rewind: (sessionId, messageIndex) => {
+  rewind: async (sessionId, messageIndex) => {
     const chat = chats.get(sessionId);
     if (!chat) return { ok: false, removed: 0 };
 
@@ -29,17 +29,20 @@ export const useRewindStore = create<RewindState>(() => ({
     const kept = messages.slice(0, messageIndex) as UIMessage[];
     const removed = messages.length - kept.length;
 
-    // Stop any in-flight request, then seed the truncated messages so the
-    // next time the session is opened it picks up the truncated history.
+    // Stop any in-flight request.
     void chat.stop();
-    chats.delete(sessionId);
-    seedMessages.set(sessionId, kept as UIMessage[]);
 
-    // Persist the truncated messages.
-    flushPersist(sessionId);
-    void import("../lib/sessions").then(({ saveMessages }) =>
-      saveMessages(sessionId, kept as UIMessage[]),
-    );
+    // Mutate messages directly on the existing Chat instance. The Chat's
+    // internal setter triggers all subscribed useChat hooks so the UI
+    // reflects the truncated history immediately — no Chat swap needed.
+    chat.messages = kept as UIMessage[];
+
+    // Cancel any pending debounced persist to prevent the old full message
+    // set from racing against the truncated messages we're about to save.
+    cancelPersist(sessionId);
+
+    // Persist the truncated messages to disk.
+    await saveMessages(sessionId, kept as UIMessage[]);
 
     return { ok: true, removed };
   },

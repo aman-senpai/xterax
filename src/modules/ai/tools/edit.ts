@@ -4,6 +4,7 @@ import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { useMutationStore } from "../store/mutationStore";
+import { getActiveTurnId } from "../lib/currentTurn";
 import { resolvePath, type ToolContext } from "./context";
 
 type EditResult =
@@ -116,6 +117,7 @@ async function applyEdits(
         originalContent: original,
         newContent: content,
         isNewFile: false,
+        turnId: getActiveTurnId(sessionId),
       });
     }
     return {

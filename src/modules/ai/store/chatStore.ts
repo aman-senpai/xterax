@@ -227,6 +227,15 @@ export function flushPersist(id?: string): void {
   for (const key of Array.from(pendingPersist.keys())) flushPersistEntry(key);
 }
 
+/** Cancel a pending debounced persist without writing. Used before rewind
+ *  to avoid racing the old full message set against truncated messages. */
+export function cancelPersist(id: string): void {
+  const entry = pendingPersist.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingPersist.delete(id);
+}
+
 export const useChatStore = create<StoreState>((set, get) => ({
   live: NOOP_LIVE,
   setLive: (live) => set({ live }),

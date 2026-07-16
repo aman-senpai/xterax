@@ -118,8 +118,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
           const { useQueueStore } = await import("../store/queueStore");
           const queued = useQueueStore.getState().dequeue(sessionId);
           if (!queued) return;
-          const { getOrCreateChat } = await import("../store/chatRuntime");
-          const chat = getOrCreateChat(sessionId);
+          const { beginTurnAndGetChat } = await import("../store/chatRuntime");
+          const chat = beginTurnAndGetChat(sessionId);
           void chat.sendMessage({ role: "user", parts: queued.parts } as Parameters<
             typeof chat.sendMessage
           >[0]);
@@ -355,8 +355,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     if (!store.rightPanelOpen) store.openRightPanel();
     void (async () => {
-      const { getOrCreateChat } = await import("../store/chatRuntime");
-      const chat = getOrCreateChat(sessionId);
+      const { beginTurnAndGetChat } = await import("../store/chatRuntime");
+      const chat = beginTurnAndGetChat(sessionId);
       void chat.sendMessage({ role: "user", parts } as Parameters<
         typeof chat.sendMessage
       >[0]);
