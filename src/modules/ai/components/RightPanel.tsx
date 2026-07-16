@@ -8,12 +8,13 @@ import {
 } from "@/components/ai-elements/context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useChat, type UIMessage } from "@ai-sdk/react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   Add01Icon,
   AlertCircleIcon,
-  ArrowDown01Icon,
   CheckListIcon,
+  Clock01Icon,
   Delete02Icon,
   Edit02Icon,
   FilterIcon,
@@ -32,18 +33,17 @@ import {
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import type { SessionMeta } from "../lib/sessions";
-import { useChatStore } from "../store/chatStore";
 import { getOrCreateChat, sendMessage } from "../store/chatRuntime";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { usePlanStore } from "../store/planStore";
+import { useChatStore } from "../store/chatStore";
 import { useMutationStore } from "../store/mutationStore";
+import { usePlanStore } from "../store/planStore";
 import { useQueueStore } from "../store/queueStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { AiComposerInput } from "./AiComposerInput";
 import { ModelDropdown } from "./AiStatusBarControls";
-import { ThinkingModeDropdown } from "./ThinkingModeDropdown";
 import { PlanDiffReview } from "./PlanDiffReview";
+import { ThinkingModeDropdown } from "./ThinkingModeDropdown";
 import { TodoStrip } from "./TodoStrip";
 
 const SUGGESTIONS = [
@@ -168,7 +168,7 @@ function Body({ sessionId }: { sessionId: string }) {
         title={activeTitle}
         onNewSession={() => {
           newSession();
-          toggleHistory();
+          if (historyOpen) toggleHistory();
         }}
       />
 
@@ -178,72 +178,77 @@ function Body({ sessionId }: { sessionId: string }) {
           activeId={activeId}
           onSelect={(id) => {
             switchSession(id);
-            toggleHistory();
+            if (historyOpen) toggleHistory();
           }}
           onDelete={deleteSession}
-        />
-      ) : null}
-
-      <PlanModeStrip />
-      <RestoreStrip sessionId={sessionId} />
-      <QueueStrip sessionId={sessionId} />
-
-      <div className="flex min-h-0 flex-1 flex-col">
-        {helpers.messages.length === 0 ? (
-          <EmptyState onPick={focusInput} />
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
-            <AiChatView
-              messages={helpers.messages}
-              status={helpers.status}
-              error={helpers.error}
-              clearError={helpers.clearError}
-              addToolApprovalResponse={helpers.addToolApprovalResponse}
-              stop={helpers.stop}
-            />
-          </div>
-        )}
-      </div>
-
-      <TodoStrip sessionId={sessionId} />
-
-      {/* AI Composer Input — moved from WorkspaceInputBar */}
-      <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ACCEPTED_FILES}
-          className="hidden"
-          onChange={(e) => {
-            void c.addFiles(e.target.files);
-            e.target.value = "";
+          onNewSession={() => {
+            newSession();
+            if (historyOpen) toggleHistory();
           }}
         />
-        <AiComposerInput />
-        <div className="mt-1.5 flex min-w-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            title="Attach file or image"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={c.isBusy}
-            className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
-          >
-            <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-          </Button>
-          <div className="shrink-0">
-            <ContextIndicator messages={helpers.messages} />
+      ) : (
+        <>
+          <PlanModeStrip />
+          <RestoreStrip sessionId={sessionId} />
+          <QueueStrip sessionId={sessionId} />
+
+          <div className="flex min-h-0 flex-1 flex-col">
+            {helpers.messages.length === 0 ? (
+              <EmptyState onPick={focusInput} />
+            ) : (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
+                <AiChatView
+                  messages={helpers.messages}
+                  status={helpers.status}
+                  error={helpers.error}
+                  clearError={helpers.clearError}
+                  addToolApprovalResponse={helpers.addToolApprovalResponse}
+                  stop={helpers.stop}
+                />
+              </div>
+            )}
           </div>
-          <AgentSwitcher className="min-w-0 max-w-[6.5rem] shrink" />
-          <span className="min-w-1 flex-1" aria-hidden />
-          <div className="flex shrink-0 items-center gap-0.5">
-            <ThinkingModeDropdown compact />
-            <ModelDropdown compact />
+
+          <TodoStrip sessionId={sessionId} />
+
+          <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_FILES}
+              className="hidden"
+              onChange={(e) => {
+                void c.addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <AiComposerInput />
+            <div className="mt-1.5 flex min-w-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                title="Attach file or image"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={c.isBusy}
+                className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
+              >
+                <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+              </Button>
+              <div className="shrink-0">
+                <ContextIndicator messages={helpers.messages} />
+              </div>
+              <AgentSwitcher className="min-w-0 max-w-[6.5rem] shrink" />
+              <span className="min-w-1 flex-1" aria-hidden />
+              <div className="flex shrink-0 items-center gap-0.5">
+                <ThinkingModeDropdown compact />
+                <ModelDropdown compact />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </>
   );
 }
@@ -298,9 +303,7 @@ function PlanModeStrip() {
 
 function RestoreStrip({ sessionId }: { sessionId: string }) {
   const [restoring, setRestoring] = useState(false);
-  const count = useMutationStore(
-    (s) => s.bySession[sessionId]?.length ?? 0,
-  );
+  const count = useMutationStore((s) => s.bySession[sessionId]?.length ?? 0);
 
   if (count === 0) return null;
 
@@ -511,17 +514,15 @@ function Header({
           onClick={toggleHistory}
           className={cn(
             "flex shrink-0 items-center justify-center size-6 rounded-md",
-            "text-muted-foreground transition-colors",
-            "hover:bg-accent hover:text-foreground",
+            "transition-colors",
+            historyOpen
+              ? "bg-accent/60 text-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
           )}
-          title="Session history"
+          title={historyOpen ? "Back to chat" : "Chat history"}
+          aria-pressed={historyOpen}
         >
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className={cn("transition-transform", historyOpen && "rotate-180")}
-          />
+          <HugeiconsIcon icon={Clock01Icon} size={12} strokeWidth={2} />
         </button>
         <button
           type="button"
@@ -664,53 +665,133 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   );
 }
 
+function relativeSessionTime(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function HistoryPanel({
   sessions,
   activeId,
   onSelect,
   onDelete,
+  onNewSession,
 }: {
   sessions: SessionMeta[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onNewSession: () => void;
 }) {
-  const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  const sorted = useMemo(
+    () => [...sessions].sort((a, b) => b.updatedAt - a.updatedAt),
+    [sessions],
+  );
 
   return (
-    <div className="max-h-[40vh] shrink-0 overflow-y-auto scrollbar-visible [scrollbar-gutter:stable] border-b border-border/60 bg-muted/30 animate-in slide-in-from-top-1 duration-150">
-      {sorted.map((s) => (
+    <div className="flex min-h-0 flex-1 flex-col bg-background animate-in fade-in-0 duration-150">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold tracking-tight text-foreground/90">
+            Chat history
+          </p>
+          <p className="text-[10.5px] text-muted-foreground">
+            {sorted.length === 0
+              ? "No conversations yet"
+              : `${sorted.length} conversation${sorted.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
         <button
-          key={s.id}
           type="button"
-          onClick={() => onSelect(s.id)}
+          onClick={onNewSession}
           className={cn(
-            "group flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left",
-            "text-[11px] transition-colors hover:bg-accent/40",
-            s.id === activeId
-              ? "bg-accent/40 text-foreground"
-              : "text-muted-foreground",
+            "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1",
+            "text-[11px] font-medium text-foreground",
+            "bg-accent/50 transition-colors hover:bg-accent",
           )}
         >
-          <span className="min-w-0 flex-1 truncate">
-            {s.title || "New chat"}
-          </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(s.id);
-            }}
-            title="Delete session"
-            className={cn(
-              "rounded p-0.5 text-muted-foreground opacity-0 transition-opacity",
-              "hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100",
-            )}
-          >
-            <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
-          </button>
+          <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
+          New
         </button>
-      ))}
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <HugeiconsIcon
+            icon={Clock01Icon}
+            size={22}
+            strokeWidth={1.5}
+            className="text-muted-foreground/50"
+          />
+          <p className="text-[12px] font-medium text-foreground/80">
+            No chats yet
+          </p>
+          <p className="max-w-[14rem] text-[11px] leading-relaxed text-muted-foreground">
+            Start a conversation and it will show up here.
+          </p>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-visible [scrollbar-gutter:stable] px-1.5 py-1.5">
+          <ul className="flex flex-col gap-0.5">
+            {sorted.map((s) => {
+              const isActive = s.id === activeId;
+              return (
+                <li key={s.id} className="group relative">
+                  <button
+                    type="button"
+                    onClick={() => onSelect(s.id)}
+                    className={cn(
+                      "flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 pr-8 text-left",
+                      "transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                      isActive
+                        ? "bg-accent/55 text-foreground"
+                        : "text-muted-foreground hover:bg-muted/55 hover:text-foreground",
+                    )}
+                  >
+                    <span className="min-w-0 truncate text-[12px] font-medium text-foreground/90">
+                      {s.title || "New chat"}
+                    </span>
+                    <span className="text-[10.5px] text-muted-foreground">
+                      {relativeSessionTime(s.updatedAt)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(s.id);
+                    }}
+                    title="Delete chat"
+                    className={cn(
+                      "absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-1",
+                      "text-muted-foreground opacity-0 transition-opacity",
+                      "hover:bg-destructive/10 hover:text-destructive",
+                      "group-hover:opacity-100 focus-visible:opacity-100",
+                      "outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    )}
+                  >
+                    <HugeiconsIcon
+                      icon={Delete02Icon}
+                      size={12}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

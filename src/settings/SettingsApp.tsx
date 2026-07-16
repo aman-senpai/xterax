@@ -1,19 +1,19 @@
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AiScanIcon,
   InformationCircleIcon,
+  KeyboardIcon,
   McpServerIcon,
   PaintBoardIcon,
   PuzzleIcon,
   Settings01Icon,
   ShieldIcon,
-  UserMultiple02Icon,
-  KeyboardIcon,
   TextIcon,
+  UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -24,10 +24,10 @@ import { GeneralSection } from "./sections/GeneralSection";
 import { McpSection } from "./sections/McpSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { PermissionsSection } from "./sections/PermissionsSection";
-import { ShortcutsSection } from "./sections/ShortcutsSection";
-import { ThemesSection } from "./sections/ThemesSection";
 import { PromptsSection } from "./sections/PromptsSection";
+import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { SkillsSection } from "./sections/SkillsSection";
+import { ThemesSection } from "./sections/ThemesSection";
 
 const TABS: {
   id: SettingsTab;
@@ -147,38 +147,64 @@ export function SettingsApp() {
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
       <header
         data-tauri-drag-region
-        className={`flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60 ${
-          IS_MAC ? "pr-3 pl-22" : "pr-0 pl-3"
-        }`}
+        className={cn(
+          "flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60",
+          IS_MAC ? "pr-3 pl-22" : "pr-0 pl-4",
+        )}
       >
-        <Tabs
-          value={active}
-          onValueChange={(v) => setActive(v as SettingsTab)}
-          orientation="horizontal"
-          className="flex-1 items-center"
+        <div
           data-tauri-drag-region
+          className="flex min-w-0 flex-1 items-center"
         >
-          <TabsList className="mx-auto h-7 bg-muted/40 px-2">
-            {TABS.map((t) => (
-              <TabsTrigger
-                key={t.id}
-                value={t.id}
-                className="h-6 gap-1.5 px-2.5 text-[11.5px]"
-              >
-                <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
-                <span>{t.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+          <span
+            data-tauri-drag-region
+            className="text-[13px] font-semibold tracking-tight text-foreground/90"
+          >
+            Settings
+          </span>
+        </div>
         {USE_CUSTOM_WINDOW_CONTROLS && <WindowControls closeOnly />}
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="mx-auto w-full max-w-160">
-          {ActiveSection && <ActiveSection />}
-        </div>
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label="Settings sections"
+          className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 bg-card/40 px-2 py-3 scrollbar-visible"
+        >
+          {TABS.map((t) => {
+            const isActive = t.id === active;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActive(t.id)}
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors",
+                  "outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  isActive
+                    ? "bg-accent text-foreground font-medium"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                )}
+              >
+                <HugeiconsIcon
+                  icon={t.icon}
+                  size={14}
+                  strokeWidth={1.75}
+                  className="shrink-0 opacity-90"
+                />
+                <span className="min-w-0 truncate">{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8 scrollbar-visible">
+          <div className="mx-auto w-full max-w-160">
+            {ActiveSection && <ActiveSection />}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
