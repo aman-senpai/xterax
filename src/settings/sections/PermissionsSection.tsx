@@ -28,6 +28,7 @@ const TOOL_LABELS: Record<keyof ToolPermissions, string> = {
   create_directory: "Create directory",
   spawn_coding_agent: "Spawn coding agent",
   send_to_agent: "Send to agent",
+  run_subagent: "Run subagents",
 };
 
 const TOOL_DESCRIPTIONS: Record<keyof ToolPermissions, string> = {
@@ -40,6 +41,8 @@ const TOOL_DESCRIPTIONS: Record<keyof ToolPermissions, string> = {
   create_directory: "Create new directories on disk.",
   spawn_coding_agent: "Fork a child agent that runs its own coding loop.",
   send_to_agent: "Forward messages to another running agent.",
+  run_subagent:
+    "Spawn parallel specialist subagents (multi-task calls always ask).",
 };
 
 const POLICY_OPTIONS: { value: ToolApprovalPolicy; label: string }[] = [

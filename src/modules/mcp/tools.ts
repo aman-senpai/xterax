@@ -133,7 +133,9 @@ export function buildMcpTools() {
       inputSchema: jsonSchemaToZod(
         cached.input_schema as Record<string, unknown> | undefined,
       ) as any,
-      needsApproval: false,
+      // MCP tools can mutate remote systems — always require approval (or
+      // session auto-approve / read-only deny via resolveToolPolicy).
+      needsApproval: true,
       execute: async (input: Record<string, unknown>) => {
         try {
           const result = await mcpCallTool(

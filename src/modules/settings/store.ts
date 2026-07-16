@@ -68,6 +68,7 @@ export type ToolPermissions = {
   create_directory: ToolApprovalPolicy;
   spawn_coding_agent: ToolApprovalPolicy;
   send_to_agent: ToolApprovalPolicy;
+  run_subagent: ToolApprovalPolicy;
 };
 
 export type ShellAllowlistEntry = {
@@ -231,6 +232,7 @@ export const DEFAULT_PERMISSIONS: PermissionSettings = {
     create_directory: "ask",
     spawn_coding_agent: "ask",
     send_to_agent: "ask",
+    run_subagent: "ask",
   },
   shellAllowlist: [
     { pattern: "npm test", enabled: false },
@@ -249,6 +251,25 @@ export const DEFAULT_PERMISSIONS: PermissionSettings = {
   ],
   writableDirectories: [],
 };
+
+/** Merge stored permissions with defaults so new tool keys (e.g. run_subagent) appear. */
+export function mergePermissions(
+  stored: PermissionSettings | null | undefined,
+): PermissionSettings {
+  if (!stored) return { ...DEFAULT_PERMISSIONS, toolPermissions: { ...DEFAULT_PERMISSIONS.toolPermissions }, shellAllowlist: [...DEFAULT_PERMISSIONS.shellAllowlist], writableDirectories: [] };
+  return {
+    toolPermissions: {
+      ...DEFAULT_PERMISSIONS.toolPermissions,
+      ...stored.toolPermissions,
+    },
+    shellAllowlist: Array.isArray(stored.shellAllowlist)
+      ? stored.shellAllowlist
+      : [...DEFAULT_PERMISSIONS.shellAllowlist],
+    writableDirectories: Array.isArray(stored.writableDirectories)
+      ? stored.writableDirectories
+      : [],
+  };
+}
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "system",
@@ -472,9 +493,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_EDITOR_AUTO_SAVE_DELAY) ??
         DEFAULT_PREFERENCES.editorAutoSaveDelay,
     ),
-    permissions:
-      get<PermissionSettings>(KEY_PERMISSIONS) ??
-      DEFAULT_PREFERENCES.permissions,
+    permissions: mergePermissions(get<PermissionSettings>(KEY_PERMISSIONS)),
     mcpServers:
       get<McpServerConfig[]>(KEY_MCP_SERVERS) ??
       DEFAULT_PREFERENCES.mcpServers,

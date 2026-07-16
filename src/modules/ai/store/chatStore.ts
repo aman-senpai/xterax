@@ -575,4 +575,6 @@ export function stop(): void {
   const id = useChatStore.getState().activeSessionId;
   if (!id) return;
   void chats.get(id)?.stop();
+  // Cancel any in-flight subagents so they stop mutating the workspace.
+  void import("../agents/runSubagent").then((m) => m.abortSubagent());
 }

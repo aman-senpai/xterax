@@ -1,6 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { spawnSubagent, waitForSubagents } from "../agents/runSubagent";
+import {
+  MAX_SUBAGENT_TASKS,
+  spawnSubagent,
+  waitForSubagents,
+} from "../agents/runSubagent";
 import { registerBatch } from "../agents/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -14,9 +18,9 @@ export function buildSubagentTools(ctx: ToolContext) {
 
 Provide an array of tasks — each with a short 'description' label and a self-contained 'prompt' that includes WHAT to do and WHERE to do it. The tool blocks until ALL subagents complete, then returns all results at once. No polling, no follow-up calls.
 
-IMPORTANT: Spawn ALL subagents in ONE call so they run concurrently. Include full instructions in each prompt — subagents have no memory of your conversation.
+IMPORTANT: Spawn ALL subagents in ONE call so they run concurrently. Include full instructions in each prompt — subagents have no memory of your conversation. Max ${MAX_SUBAGENT_TASKS} tasks per call.
 
-Auto-executes (no approval).`,
+Asks for user approval when spawning more than one subagent.`,
       inputSchema: z.object({
         tasks: z
           .array(
@@ -32,20 +36,40 @@ Auto-executes (no approval).`,
                   "Self-contained instruction with all context. Include file paths, what to do, and where to put output.",
                 ),
               agentType: z
-                .enum(["coder", "architect", "reviewer", "security", "designer"])
+                .enum([
+                  "coder",
+                  "architect",
+                  "reviewer",
+                  "security",
+                  "designer",
+                ])
                 .optional()
                 .describe(
                   "Specialist persona to assign. Omit for a general-purpose subagent. Use to inject domain expertise: 'architect' for design/tradeoffs, 'coder' for implementation, 'reviewer' for code review, 'security' for threat modeling, 'designer' for UI/UX critique.",
                 ),
             }),
           )
-          .describe("One or more tasks to run in parallel."),
+          .max(MAX_SUBAGENT_TASKS)
+          .describe(
+            `One or more tasks to run in parallel (max ${MAX_SUBAGENT_TASKS}).`,
+          ),
       }),
+      // Multi-task fan-out is high impact — require approval when N > 1.
+      // Single-task research stays auto for low friction; the execute path
+      // still respects session permissionMode via the parent agent gate.
+      needsApproval: async ({ tasks }) => (tasks?.length ?? 0) > 1,
       execute: async ({ tasks }) => {
         const { apiKeys } = useChatStore.getState();
 
-        if (tasks.length === 0) {
+        if (!tasks || tasks.length === 0) {
           return { results: [] };
+        }
+
+        if (tasks.length > MAX_SUBAGENT_TASKS) {
+          return {
+            error: `Too many subagent tasks (${tasks.length}). Max is ${MAX_SUBAGENT_TASKS}. Split into multiple run_subagent calls.`,
+            denied: true,
+          };
         }
 
         const prefs = usePreferencesStore.getState();
@@ -63,7 +87,6 @@ Auto-executes (no approval).`,
 
         const resolvedModelId = currentModel.id;
 
-        // Spawn all subagents in parallel — each returns immediately with a jobId.
         const spawned: Array<{ jobId: string; desc: string }> = [];
         const jobIds = tasks.map((t) => {
           const jobId = spawnSubagent({
@@ -82,10 +105,8 @@ Auto-executes (no approval).`,
           return jobId;
         });
 
-        // Register batch so the UI can subscribe to per-task streaming progress.
         registerBatch(spawned);
 
-        // Block until all complete, then return results.
         const results = await waitForSubagents(jobIds);
 
         return {

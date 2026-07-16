@@ -108,6 +108,12 @@ export type RefineOptions = {
   now?: number;
   reason?: ProfileSnapshot["reason"];
   note?: string | null;
+  /**
+   * When set, the LLM extractor only sees signals newer than this watermark
+   * (plus any still referenced by existing preferences). Priors/profile state
+   * still come from the full stored profile so consolidation is stable.
+   */
+  sinceTimestamp?: number;
 };
 
 export type RefineResult = {
@@ -140,7 +146,28 @@ export async function refineProfile(
     options.scope,
     options.projectRoot,
   );
-  const signals = rawSignals.filter((s) => !isNoisePreference(s.preference));
+  const cleanSignals = rawSignals.filter(
+    (s) => !isNoisePreference(s.preference),
+  );
+  // Prefer new signals for extraction cost control. Always include signals
+  // already attached to priors so confidence re-scoring keeps full evidence.
+  const priorSignalIds = new Set(
+    (previous?.preferences ?? []).flatMap((p) => p.signalIds ?? []),
+  );
+  const signals =
+    options.sinceTimestamp != null && options.sinceTimestamp > 0
+      ? cleanSignals.filter(
+          (s) =>
+            s.timestamp > options.sinceTimestamp! || priorSignalIds.has(s.id),
+        )
+      : cleanSignals;
+  // If watermark filtered everything but we still have priors, keep empty
+  // extraction inputs so the pass can still decay/write without re-hashing
+  // the entire history through the LLM.
+  const extractionSignals =
+    options.sinceTimestamp != null && options.sinceTimestamp > 0
+      ? cleanSignals.filter((s) => s.timestamp > options.sinceTimestamp!)
+      : cleanSignals;
 
   // Defensive filter: if this profile somehow accumulated preferences that are
   // obviously about a completely different project (historical resolution bugs),
@@ -170,7 +197,7 @@ export async function refineProfile(
     provider?: string;
   };
   try {
-    extraction = await extractor(signals, {
+    extraction = await extractor(extractionSignals, {
       ...deps,
       getPriorPreferences: () => previous?.preferences ?? [],
       currentProjectRoot: options.projectRoot,

@@ -71,6 +71,27 @@ const IDLE_MIN_PENDING_SIGNALS = 1;
 const SIGNAL_SINCE_LAST_REFINE_KEY = "agent.signalCount";
 const LAST_REFINE_AT_KEY = "agent.lastRefineAt";
 
+/** Per-scope watermark: max signal timestamp included in the last successful refine. */
+const scopeWatermarks = new Map<string, number>();
+
+function watermarkKey(scope: Scope, projectRoot: string | null): string {
+  return scope === "project" ? `project:${projectRoot ?? ""}` : "user";
+}
+
+function getWatermark(scope: Scope, projectRoot: string | null): number {
+  return scopeWatermarks.get(watermarkKey(scope, projectRoot)) ?? 0;
+}
+
+function setWatermark(
+  scope: Scope,
+  projectRoot: string | null,
+  ts: number,
+): void {
+  const key = watermarkKey(scope, projectRoot);
+  const prev = scopeWatermarks.get(key) ?? 0;
+  if (ts > prev) scopeWatermarks.set(key, ts);
+}
+
 export type AgentState = {
   status: "idle" | "observing" | "refining" | "writing" | "error";
   lastRefineAt: number;
@@ -190,6 +211,7 @@ export function _resetAgentForTests(): void {
   schedulerStarted = false;
   projectRoot = null;
   turnHadRejection = false;
+  scopeWatermarks.clear();
   emit();
 }
 
@@ -350,12 +372,16 @@ async function initialSweep(): Promise<void> {
 
 async function hasUnprocessedSignals(): Promise<boolean> {
   const activeRoot = projectRoot ?? getAnchoredProjectRoot();
-  const cutoff = state.lastRefineAt;
   const userSignals = await storage.loadSignals("user", null);
   const projectSignals = activeRoot
     ? await storage.loadSignals("project", activeRoot)
     : [];
-  return [...userSignals, ...projectSignals].some((s) => s.timestamp > cutoff);
+  const userWm = getWatermark("user", null);
+  const projWm = getWatermark("project", activeRoot);
+  return (
+    userSignals.some((s) => s.timestamp > userWm) ||
+    projectSignals.some((s) => s.timestamp > projWm)
+  );
 }
 
 async function maybeRefine(
@@ -411,13 +437,24 @@ async function runRefinePass(trigger: string): Promise<void> {
     });
     const results: RefineResult[] = [];
     for (const target of scopes) {
-      results.push(
-        await refineProfile(deps, {
-          scope: target.scope,
-          projectRoot: target.projectRoot,
-          note: `auto-refine ${target.scope} (${trigger})`,
-        }),
+      const since = getWatermark(target.scope, target.projectRoot);
+      const result = await refineProfile(deps, {
+        scope: target.scope,
+        projectRoot: target.projectRoot,
+        note: `auto-refine ${target.scope} (${trigger})`,
+        sinceTimestamp: since > 0 ? since : undefined,
+      });
+      results.push(result);
+      // Advance watermark to the newest signal we may have consumed.
+      const scopeSignals = await storage.loadSignals(
+        target.scope,
+        target.projectRoot,
       );
+      let maxTs = since;
+      for (const s of scopeSignals) {
+        if (s.timestamp > maxTs) maxTs = s.timestamp;
+      }
+      setWatermark(target.scope, target.projectRoot, maxTs);
     }
     const last = results[results.length - 1]!;
     setState({ status: "writing", lastSummary: "Writing profile.md" });
@@ -449,15 +486,18 @@ async function scopesNeedingRefine(): Promise<
   const projectSignals = activeRoot
     ? await storage.loadSignals("project", activeRoot)
     : [];
-  if (userSignals.length > 0) {
+  const userWm = getWatermark("user", null);
+  if (userSignals.some((s) => s.timestamp > userWm)) {
     out.push({ scope: "user", projectRoot: null });
   }
-  if (
-    activeRoot &&
-    (projectSignals.length > 0 || state.signalsSinceLastRefine > 0)
-  ) {
-    out.push({ scope: "project", projectRoot: activeRoot });
+  if (activeRoot) {
+    const projWm = getWatermark("project", activeRoot);
+    if (projectSignals.some((s) => s.timestamp > projWm)) {
+      out.push({ scope: "project", projectRoot: activeRoot });
+    }
   }
+  // Counter-only path: new signals were recorded but storage load is empty
+  // (race) — still attempt project or user refine with current watermark.
   if (out.length === 0 && state.signalsSinceLastRefine > 0) {
     out.push({
       scope: activeRoot ? "project" : "user",

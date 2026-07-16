@@ -160,13 +160,18 @@ export async function recordAcceptedChange(
 export async function recordRejectedChange(
   preference: string,
   evidence: string,
-  opts?: { category?: Domain | string; projectRoot?: string | null },
+  opts?: {
+    category?: Domain | string;
+    projectRoot?: string | null;
+    weight?: number;
+  },
 ): Promise<RecordSignalResult> {
   return recordSignal({
     source: "rejected-change",
     category: opts?.category ?? "general",
     preference,
     evidence,
+    weight: opts?.weight,
     scope: opts?.projectRoot ? "project" : "user",
     projectRoot: opts?.projectRoot ?? null,
   });

@@ -14,7 +14,10 @@ import { buildEditTools } from "../tools/edit";
 import { buildShellTools } from "../tools/shell";
 import { useChatStore, type PermissionMode } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { resolveToolPolicy } from "../lib/permissions";
+import {
+  filterToolsByAllowlist,
+  resolveToolPolicy,
+} from "../lib/permissions";
 import {
   pushToolStep,
   pushToolResult,
@@ -24,7 +27,20 @@ import {
   finishSubagent,
 } from "./subagentProgress";
 
-// Mutation tools that require approval in "default" and are denied in "read-only".
+/** Hard cap on parallel subagent tasks per run_subagent call. */
+export const MAX_SUBAGENT_TASKS = 6;
+const SUBAGENT_MAX_STEPS = 12;
+const WAIT_TIMEOUT_MS = 120_000;
+
+/** Tools each specialist role may use (group ids + tool names). */
+const ROLE_TOOL_ALLOWLIST: Record<string, string[] | null> = {
+  coder: null, // full
+  architect: ["fs", "search", "todo"],
+  reviewer: ["fs", "search"],
+  security: ["fs", "search"],
+  designer: ["fs", "search"],
+};
+
 const MUTATION_TOOLS = new Set([
   "write_file",
   "edit",
@@ -34,9 +50,8 @@ const MUTATION_TOOLS = new Set([
   "bash_background",
   "spawn_coding_agent",
   "send_to_agent",
+  "bash_kill",
 ]);
-
-const SUBAGENT_MAX_STEPS = 12;
 
 type Args = {
   jobId: string;
@@ -47,6 +62,7 @@ type Args = {
   modelId: string;
   thinkingLevel: ThinkingLevel;
   toolContext: ToolContext;
+  abortSignal?: AbortSignal;
 };
 
 export type RunResult = {
@@ -58,7 +74,7 @@ export type RunResult = {
 
 // ---- Background job store ----
 
-type JobState = "running" | "done" | "error";
+type JobState = "running" | "done" | "error" | "aborted";
 
 type JobEntry = {
   description?: string;
@@ -66,6 +82,7 @@ type JobEntry = {
   result?: RunResult;
   error?: string;
   startedAt: number;
+  controller: AbortController;
   resolve: () => void;
 };
 
@@ -75,8 +92,9 @@ function nextJobId(): string {
   return `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-export function spawnSubagent(args: Omit<Args, "jobId">): string {
+export function spawnSubagent(args: Omit<Args, "jobId" | "abortSignal">): string {
   const jobId = nextJobId();
+  const controller = new AbortController();
   let resolve: () => void = () => {};
   void new Promise<void>((r) => {
     resolve = r;
@@ -86,19 +104,50 @@ export function spawnSubagent(args: Omit<Args, "jobId">): string {
     description: args.description,
     status: "running",
     startedAt: Date.now(),
+    controller,
     resolve,
   };
   jobs.set(jobId, entry);
 
+  // Isolated tool context: own read cache + shell scope so parallel subagents
+  // cannot stomp each other's cwd or read-before-edit cache.
+  const isolatedCtx: ToolContext = {
+    ...args.toolContext,
+    readCache: new Map(),
+    getShellScopeId: () => jobId,
+  };
+
   void (async () => {
     try {
-      const r = await runSubagent({ ...args, jobId });
+      if (controller.signal.aborted) {
+        entry.status = "aborted";
+        entry.error = "aborted before start";
+        finishSubagent(jobId, "aborted");
+        return;
+      }
+      const r = await runSubagent({
+        ...args,
+        jobId,
+        toolContext: isolatedCtx,
+        abortSignal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        entry.status = "aborted";
+        entry.error = "aborted";
+        finishSubagent(jobId, "aborted");
+        return;
+      }
       entry.status = "done";
       entry.result = { ...r, description: args.description };
     } catch (e) {
-      entry.status = "error";
-      entry.error = String(e);
-      finishSubagent(jobId, String(e));
+      const msg = String(e);
+      const aborted =
+        controller.signal.aborted ||
+        /abort/i.test(msg) ||
+        (e instanceof Error && e.name === "AbortError");
+      entry.status = aborted ? "aborted" : "error";
+      entry.error = aborted ? "aborted" : msg;
+      finishSubagent(jobId, entry.error);
     } finally {
       jobs.get(jobId)?.resolve();
     }
@@ -107,7 +156,16 @@ export function spawnSubagent(args: Omit<Args, "jobId">): string {
   return jobId;
 }
 
-const WAIT_TIMEOUT_MS = 120_000;
+/** Abort a single subagent (or all if jobId omitted). */
+export function abortSubagent(jobId?: string): void {
+  if (jobId) {
+    jobs.get(jobId)?.controller.abort();
+    return;
+  }
+  for (const entry of jobs.values()) {
+    entry.controller.abort();
+  }
+}
 
 export async function waitForSubagents(
   jobIds: string[],
@@ -127,8 +185,28 @@ export async function waitForSubagents(
     });
   });
 
-  const timeout = new Promise<void>((r) => setTimeout(r, WAIT_TIMEOUT_MS));
-  await Promise.race([Promise.all(promises), timeout]);
+  const timeout = new Promise<"timeout">((r) =>
+    setTimeout(() => r("timeout"), WAIT_TIMEOUT_MS),
+  );
+  const raced = await Promise.race([
+    Promise.all(promises).then(() => "done" as const),
+    timeout,
+  ]);
+
+  // On timeout: abort still-running jobs so they stop mutating the workspace.
+  if (raced === "timeout") {
+    for (const id of jobIds) {
+      const entry = jobs.get(id);
+      if (entry?.status === "running") {
+        entry.controller.abort();
+      }
+    }
+    // Brief grace period for abort handlers to settle.
+    await Promise.race([
+      Promise.all(promises),
+      new Promise<void>((r) => setTimeout(r, 1500)),
+    ]);
+  }
 
   const results: (RunResult & {
     jobId: string;
@@ -149,6 +227,7 @@ export async function waitForSubagents(
       continue;
     }
     if (entry.status === "running") {
+      entry.controller.abort();
       results.push({
         jobId: id,
         status: "error",
@@ -156,7 +235,7 @@ export async function waitForSubagents(
         description: entry.description,
         summary: "",
         stepCount: 0,
-        durationMs: 0,
+        durationMs: Date.now() - entry.startedAt,
       });
       finishSubagent(id, "timed out");
     } else {
@@ -174,12 +253,18 @@ export async function waitForSubagents(
 
 // ---- Internal runner — mirrors main agent pipeline ----
 
+function roleAllowlist(agentType?: string | null): string[] | null {
+  if (!agentType) return null;
+  return ROLE_TOOL_ALLOWLIST[agentType] ?? null;
+}
+
 /** All tools except run_subagent (prevent recursion), with needsApproval
  *  stripped and execute wrapped with permission-mode-aware approval. */
 function buildSubagentToolSet(
   ctx: ToolContext,
   jobId: string,
   permissionMode: PermissionMode,
+  agentType?: string | null,
 ): Record<string, unknown> {
   const raw = {
     ...buildFsTools(ctx),
@@ -188,57 +273,80 @@ function buildSubagentToolSet(
     ...buildShellTools(ctx),
   };
 
-  // Clone each tool, strip needsApproval.
+  // Specialist roles get a reduced tool surface.
+  const roleFiltered = filterToolsByAllowlist(raw, roleAllowlist(agentType));
+
   const tools: Record<string, unknown> = {};
-  for (const [name, t] of Object.entries(raw)) {
+  for (const [name, t] of Object.entries(roleFiltered)) {
     if (!t || typeof t !== "object") continue;
     tools[name] = { ...(t as object), needsApproval: false };
   }
 
-  // Wrap each tool's execute with permission-aware approval logic.
   let toolCallIdx = 0;
   for (const [name, t] of Object.entries(tools)) {
     const toolObj = t as Record<string, unknown>;
     const originalExecute = toolObj.execute as
-      | ((args: unknown) => Promise<unknown>)
+      | ((args: unknown, opts?: { toolCallId?: string }) => Promise<unknown>)
       | undefined;
     if (!originalExecute) continue;
     const isMutation = MUTATION_TOOLS.has(name);
 
-    toolObj.execute = async (args: unknown) => {
+    toolObj.execute = async (
+      args: unknown,
+      execOpts?: { toolCallId?: string },
+    ) => {
+      if (jobs.get(jobId)?.controller.signal.aborted) {
+        return { error: "Subagent aborted", denied: true, aborted: true };
+      }
       const idx = toolCallIdx++;
-      pushToolStep(jobId, idx, name, args);
+      const toolCallId = execOpts?.toolCallId ?? `${jobId}-call-${idx}`;
+      pushToolStep(jobId, idx, name, args, toolCallId);
 
       if (permissionMode === "auto-approve") {
-        return originalExecute(args);
+        const out = await originalExecute(args, execOpts);
+        pushToolResult(jobId, toolCallId, out);
+        return out;
       }
 
       if (permissionMode === "read-only") {
         if (isMutation) {
-          return {
+          const denied = {
             error: `Read-only mode: "${name}" is not allowed.`,
             denied: true,
           };
+          pushToolResult(jobId, toolCallId, denied);
+          return denied;
         }
-        return originalExecute(args);
+        const out = await originalExecute(args, execOpts);
+        pushToolResult(jobId, toolCallId, out);
+        return out;
       }
 
-      // default mode: consult per-tool permissions and shell allowlist.
       if (isMutation) {
         const policy = resolveToolPolicy(name, permissionMode, args);
-        if (policy === "auto-approve") return originalExecute(args);
+        if (policy === "auto-approve") {
+          const out = await originalExecute(args, execOpts);
+          pushToolResult(jobId, toolCallId, out);
+          return out;
+        }
         if (policy === "deny") {
-          return {
+          const denied = {
             error: `Denied by permissions: "${name}"`,
             denied: true,
           };
+          pushToolResult(jobId, toolCallId, denied);
+          return denied;
         }
         const approved = await pushApprovalRequired(jobId, idx, name, args);
         if (!approved) {
-          return { denied: true, message: "User denied this tool call." };
+          const denied = { denied: true, message: "User denied this tool call." };
+          pushToolResult(jobId, toolCallId, denied);
+          return denied;
         }
       }
-      return originalExecute(args);
+      const out = await originalExecute(args, execOpts);
+      pushToolResult(jobId, toolCallId, out);
+      return out;
     };
   }
 
@@ -253,8 +361,8 @@ async function runSubagent({
   modelId,
   thinkingLevel,
   toolContext,
+  abortSignal,
 }: Args): Promise<Omit<RunResult, "description">> {
-  // ── Model (same as main agent) ──────────────────────────────────────
   const prefs = usePreferencesStore.getState();
   const model = await buildConfiguredLanguageModel(modelId, keys, {
     lmstudioBaseURL: prefs.lmstudioBaseURL,
@@ -271,9 +379,6 @@ async function runSubagent({
   const info = resolveModel(modelId, prefs.customEndpoints);
   const provider = info.provider;
 
-  // ── System prompt ───────────────────────────────────────────────────
-  // When agentType is set, inject the specialist persona so the subagent
-  // has domain expertise on top of its tool-first behavior.
   const baseSystem = agentType
     ? getSubagentSystemPrompt() +
       "\n\n## SPECIALIST ROLE — " +
@@ -282,23 +387,23 @@ async function runSubagent({
       getAgentPrompt(agentType)
     : selectSystemPrompt(modelId);
 
-  // ── Thinking config ─────────────────────────────────────────────────
   const providerOptions = buildThinkingProviderOptions(
     provider,
     thinkingLevel,
     modelId,
   );
 
-  // ── Permission mode ─────────────────────────────────────────────────
   const permissionMode = useChatStore.getState().permissionMode;
-
-  // ── Tools (all except run_subagent), with approval wrapping ─────────
-  const tools = buildSubagentToolSet(toolContext, jobId, permissionMode);
+  const tools = buildSubagentToolSet(
+    toolContext,
+    jobId,
+    permissionMode,
+    agentType,
+  );
 
   const start = Date.now();
   let stepCount = 0;
 
-  // ── Stream (live text pushed to progress store) ────────────────────
   const result = streamText({
     model,
     system: baseSystem,
@@ -306,7 +411,9 @@ async function runSubagent({
     tools: tools as Parameters<typeof streamText>[0]["tools"],
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
     stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
+    abortSignal,
     onChunk: (chunk) => {
+      if (abortSignal?.aborted) return;
       if (chunk.chunk.type === "text-delta") {
         pushTextDelta(jobId, chunk.chunk.text);
       }
@@ -316,22 +423,16 @@ async function runSubagent({
     },
     onStepFinish: (step) => {
       stepCount++;
-      if (step.toolResults) {
-        for (const tr of step.toolResults) {
-          pushToolResult(
-            jobId,
-            tr.toolCallId,
-            (tr as { output?: unknown }).output,
-            (tr as { errorText?: string }).errorText,
-          );
-        }
-      }
+      // Results are pushed from the execute wrapper (by toolCallId).
+      // Keep stepCount only here.
+      void step;
     },
   });
 
-  // Consume the stream to completion.
   const text = await result.text;
-  finishSubagent(jobId);
+  if (!abortSignal?.aborted) {
+    finishSubagent(jobId);
+  }
 
   return {
     summary: text || "(no output)",
@@ -340,4 +441,4 @@ async function runSubagent({
   };
 }
 
-export { SUBAGENT_MAX_STEPS };
+export { SUBAGENT_MAX_STEPS, WAIT_TIMEOUT_MS };

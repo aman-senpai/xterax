@@ -372,6 +372,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const stop = () => {
     if (!sessionId) return;
     void getChat(sessionId)?.stop();
+    void import("../agents/runSubagent").then((m) => m.abortSubagent());
   };
 
   const canSend =

@@ -48,7 +48,7 @@ import type {
 } from "ai";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AiToolApproval } from "./AiToolApproval";
-import { resolveToolPolicy } from "../lib/permissions";
+import { getActiveAgent, resolveToolPolicy } from "../lib/permissions";
 import { getContinueMessage } from "../lib/prompts";
 
 function CommandSnippet({ name }: { name: string }) {
@@ -953,7 +953,12 @@ const RenderedTool = memo(function RenderedTool({
   const policy = useMemo(
     () =>
       part.state === "approval-requested"
-        ? resolveToolPolicy(toolName, permissionMode, part.input)
+        ? resolveToolPolicy(
+            toolName,
+            permissionMode,
+            part.input,
+            getActiveAgent(),
+          )
         : null,
     [part.state, toolName, permissionMode, part.input],
   );

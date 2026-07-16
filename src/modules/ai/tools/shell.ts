@@ -52,7 +52,12 @@ export function buildShellTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         try {
           const cwd = ctx.getCwd();
-          const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
+          const shellScope =
+            ctx.getShellScopeId?.() ?? sid;
+          const shellId = await getSessionShell(
+            workspaceSessionKey(shellScope),
+            cwd,
+          );
           const r = await native.shellSessionRun(
             shellId,
             command,

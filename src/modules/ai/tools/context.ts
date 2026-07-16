@@ -27,6 +27,12 @@ export type ToolContext = {
   readCache: Map<string, { size: number; hash: number }>;
   /** Active chat session id — used by tools that persist per-session state (todos). */
   getSessionId: () => string | null;
+  /**
+   * Scope key for the persistent agent shell. Defaults to the chat session id
+   * when omitted. Subagents pass their job id so parallel agents do not share
+   * one shell / cwd.
+   */
+  getShellScopeId?: () => string | null;
 };
 
 export function resolvePath(rawPath: string, cwd: string | null): string {

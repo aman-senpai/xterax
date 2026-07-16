@@ -34,6 +34,12 @@ import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
+import {
+  applyAgentToolFilter,
+  getActiveAgent,
+  resolveToolPolicy,
+} from "./permissions";
+import { useChatStore } from "../store/chatStore";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -517,10 +523,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
 
   let stepsSeen = 0;
+  const activeAgent = getActiveAgent();
+  const rawTools = buildTools(opts.toolContext) as Record<string, unknown>;
+  const filteredTools = applyAgentToolFilter(rawTools, activeAgent);
+  const tools = wrapToolsWithPermissionGate(filteredTools);
+
   return streamText({
     model,
     messages: finalMessages,
-    tools: buildTools(opts.toolContext),
+    tools: tools as Parameters<typeof streamText>[0]["tools"],
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     ...(Object.keys(thinkingProviderOptions).length > 0
@@ -572,6 +583,45 @@ export async function runAgentStream(opts: RunAgentOptions) {
       opts.onTurnFinish?.();
     },
   });
+}
+
+/**
+ * Execute-time permission gate for the main agent. Complements AI SDK
+ * `needsApproval` (which is UI-coupled) so deny / agent-allowlist / read-only
+ * cannot be bypassed if the approval card never mounts.
+ */
+function wrapToolsWithPermissionGate(
+  tools: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [name, t] of Object.entries(tools)) {
+    if (!t || typeof t !== "object") {
+      out[name] = t;
+      continue;
+    }
+    const toolObj = { ...(t as object) } as Record<string, unknown>;
+    const originalExecute = toolObj.execute as
+      | ((args: unknown, opts?: unknown) => Promise<unknown>)
+      | undefined;
+    if (!originalExecute) {
+      out[name] = toolObj;
+      continue;
+    }
+    toolObj.execute = async (args: unknown, execOpts?: unknown) => {
+      const permissionMode = useChatStore.getState().permissionMode;
+      const agent = getActiveAgent();
+      const policy = resolveToolPolicy(name, permissionMode, args, agent);
+      if (policy === "deny") {
+        return {
+          error: `Denied by permissions: "${name}"`,
+          denied: true,
+        };
+      }
+      return originalExecute(args, execOpts);
+    };
+    out[name] = toolObj;
+  }
+  return out;
 }
 
 export { EMPTY_USAGE };

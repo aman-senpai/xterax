@@ -7,6 +7,7 @@ export type SubagentStreamState = {
     output?: unknown;
     state: "pending" | "done" | "error" | "awaiting-approval" | "denied";
     errorText?: string;
+    toolCallId?: string;
   }>;
   reasoning: string;
   error?: string;
@@ -131,12 +132,18 @@ export function pushToolStep(
   stepIndex: number,
   toolName: string,
   input: unknown,
+  toolCallId?: string,
 ) {
   const s = getOrCreate(jobId);
   while (s.steps.length <= stepIndex) {
     s.steps.push({ toolName, input, state: "pending" });
   }
-  s.steps[stepIndex] = { toolName, input, state: "pending" };
+  s.steps[stepIndex] = {
+    toolName,
+    input,
+    state: "pending",
+    toolCallId,
+  };
   notify();
 }
 
@@ -153,17 +160,27 @@ export function pushToolCall(
 
 export function pushToolResult(
   jobId: string,
-  _toolCallId: string,
+  toolCallId: string,
   output: unknown,
   errorText?: string,
 ) {
   const s = getOrCreate(jobId);
-  const step = s.steps.find(
-    (st) => st.state === "pending" || st.state === "awaiting-approval",
-  );
+  // Prefer exact toolCallId match so parallel tool calls attribute correctly.
+  let step = toolCallId
+    ? s.steps.find((st) => st.toolCallId === toolCallId)
+    : undefined;
+  if (!step) {
+    step = s.steps.find(
+      (st) => st.state === "pending" || st.state === "awaiting-approval",
+    );
+  }
   if (step) {
     step.output = output;
-    step.state = errorText ? "error" : "done";
+    const denied =
+      output &&
+      typeof output === "object" &&
+      (output as { denied?: boolean }).denied === true;
+    step.state = errorText ? "error" : denied ? "denied" : "done";
     step.errorText = errorText;
   }
   notify();

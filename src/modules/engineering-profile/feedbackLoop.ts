@@ -43,7 +43,12 @@ import {
   REWARD_ANCHOR_MIN,
   REINFORCEMENT_MIN_SIGNALS,
 } from "./confidence";
-const ALIGNMENT_CONFIDENCE_THRESHOLD = 0.5;
+/** Only score high-confidence prefs — keyword alignment is noisy below this. */
+const ALIGNMENT_CONFIDENCE_THRESHOLD = 0.75;
+/** Require at least this many distinctive tokens before treating a match as real. */
+const MIN_KEYWORD_TOKEN_LEN = 5;
+/** Cap how many alignment signals we emit per turn (violations preferred). */
+const MAX_ALIGNMENT_SIGNALS_PER_TURN = 2;
 
 export type TurnSnapshot = {
   sessionId: string;
@@ -149,13 +154,26 @@ function keywordFor(prefNorm: string): string | null {
     "of",
     "a",
     "an",
+    "when",
+    "that",
+    "this",
+    "from",
+    "into",
+    "should",
+    "must",
+    "code",
+    "file",
+    "files",
   ]);
-  const tokens = (prefNorm.match(/\b([a-z][a-z0-9.+#-]{3,})\b/g) || []).filter(
-    (t) => !STOP.has(t),
-  );
+  const tokens = (
+    prefNorm.match(new RegExp(`\\b([a-z][a-z0-9.+#-]{${MIN_KEYWORD_TOKEN_LEN - 1},})\\b`, "g")) ||
+    []
+  ).filter((t) => !STOP.has(t));
   if (tokens.length === 0) return null;
-  // longest distinctive first
-  return tokens.sort((a, b) => b.length - a.length)[0];
+  // Require a reasonably distinctive token (avoid short generic matches).
+  const best = tokens.sort((a, b) => b.length - a.length)[0];
+  if (!best || best.length < MIN_KEYWORD_TOKEN_LEN) return null;
+  return best;
 }
 
 function keywordPresent(
@@ -164,10 +182,16 @@ function keywordPresent(
   _text: string,
   textNorm: string,
 ): boolean {
-  if (textNorm.includes(keyword)) return true;
+  // Word-boundary-ish check: avoid matching "react" inside "preact" via loose includes
+  // for very short keywords; for longer keywords substring is acceptable.
+  const re = new RegExp(
+    `(^|[^a-z0-9])${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`,
+    "i",
+  );
+  if (re.test(textNorm)) return true;
   for (const tc of turn.toolCalls) {
     const blob = JSON.stringify(tc.input).toLowerCase();
-    if (blob.includes(keyword)) return true;
+    if (re.test(blob)) return true;
   }
   return false;
 }
@@ -194,7 +218,16 @@ export async function emitAlignmentSignals(
   sessionId: string,
 ): Promise<Signal[]> {
   const out: Signal[] = [];
-  for (const score of scores) {
+  // Prefer violations (corrective). Skip bulk "honored" auto-signals — they
+  // inflate confidence from keyword noise. Honored is only used when the user
+  // accepts a turn without rejection (recordTurnAcceptance).
+  const ranked = [
+    ...scores.filter((s) => s.alignment === "violated"),
+  ]
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, MAX_ALIGNMENT_SIGNALS_PER_TURN);
+
+  for (const score of ranked) {
     const evidencePrefix = `[${sessionId.slice(0, 8)}] `;
     if (score.alignment === "violated") {
       const signal = await recordRejectedChange(
@@ -203,16 +236,8 @@ export async function emitAlignmentSignals(
         {
           category: score.category,
           projectRoot,
-        },
-      );
-      if (signal.accepted) out.push(signal.signal);
-    } else if (score.alignment === "honored") {
-      const signal = await recordAcceptedChange(
-        score.preference,
-        score.reason,
-        {
-          category: score.category,
-          projectRoot,
+          // Heuristic feedback is low-weight so explicit user signals dominate.
+          weight: 0.35,
         },
       );
       if (signal.accepted) out.push(signal.signal);
