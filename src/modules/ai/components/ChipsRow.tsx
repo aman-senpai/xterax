@@ -35,7 +35,7 @@ export function ChipsRow({
     files.length > 0 || snippets.length > 0 || commands.length > 0;
   if (!leading && !hasAttachments) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
       {leading}
       {commands.map((cmd) => (
         <Chip

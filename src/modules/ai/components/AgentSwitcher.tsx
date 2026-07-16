@@ -82,8 +82,8 @@ export function AgentSwitcher({
           variant="outline"
           className={cn(
             !isMiniWindow
-              ? "flex h-6 max-w-full items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground min-w-0 overflow-hidden"
-              : "text-xs mr-1",
+              ? "flex h-6 max-w-full min-w-0 items-center gap-1 overflow-hidden rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+              : "mr-1 text-xs",
             className,
           )}
           title={`Agent: ${active.name}${isDefault ? " (Default)" : ""}`}
@@ -94,9 +94,11 @@ export function AgentSwitcher({
             strokeWidth={1.75}
             className="shrink-0"
           />
-          <span className="min-w-0 truncate">{active.name}</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {active.name}
+          </span>
           {isDefault && (
-            <span className="ml-0.5 shrink-0 text-[9px] text-amber-500/80">
+            <span className="shrink-0 text-[9px] leading-none text-amber-500/80">
               ★
             </span>
           )}
@@ -119,7 +121,9 @@ export function AgentSwitcher({
           />
           <span className="text-[11px] font-medium">{active.name}</span>
           {isDefault && (
-            <span className="text-[9px] text-amber-500/80 ml-auto">Default</span>
+            <span className="text-[9px] text-amber-500/80 ml-auto">
+              Default
+            </span>
           )}
         </div>
 

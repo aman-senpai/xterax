@@ -482,13 +482,13 @@ html *::-webkit-scrollbar {
   }
 }
 
-/* Contenteditable placeholder (like a textarea placeholder). */
-[contenteditable="true"]:empty::before {
+/* Contenteditable placeholder (like a textarea placeholder).
+ * Prefer a React-driven overlay when browser :empty is unreliable (<br>).
+ * Keep this as a fallback only when data-placeholder is set. */
+[contenteditable="true"][data-placeholder]:empty::before {
   content: attr(data-placeholder);
   color: var(--color-muted-foreground, hsl(var(--muted-foreground)));
-  opacity: 0.6;
+  opacity: 0.55;
   pointer-events: none;
-  position: absolute;
-  left: 0;
-  top: 0;
+  white-space: pre-wrap;
 }

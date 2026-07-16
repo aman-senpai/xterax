@@ -7,20 +7,25 @@ import {
   ContextTrigger,
 } from "@/components/ai-elements/context";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   Add01Icon,
   AlertCircleIcon,
+  ArrowRight01Icon,
   CheckListIcon,
   Clock01Icon,
   Delete02Icon,
   Edit02Icon,
   FilterIcon,
   FlashIcon,
+  Mic01Icon,
+  Queue01Icon,
   RefreshIcon,
   ShieldUserIcon,
+  StopCircleIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -211,7 +216,7 @@ function Body({ sessionId }: { sessionId: string }) {
 
           <TodoStrip sessionId={sessionId} />
 
-          <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
+          <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2.5">
             <input
               ref={fileInputRef}
               type="file"
@@ -223,27 +228,118 @@ function Body({ sessionId }: { sessionId: string }) {
                 e.target.value = "";
               }}
             />
-            <AiComposerInput />
-            <div className="mt-1.5 flex min-w-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                title="Attach file or image"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={c.isBusy}
-                className="size-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
-              >
-                <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-              </Button>
-              <div className="shrink-0">
-                <ContextIndicator messages={helpers.messages} />
-              </div>
-              <AgentSwitcher className="min-w-0 max-w-[6.5rem] shrink" />
-              <span className="min-w-1 flex-1" aria-hidden />
-              <div className="flex shrink-0 items-center gap-0.5">
-                <ThinkingModeDropdown compact />
-                <ModelDropdown compact />
+            <div className="rounded-xl border border-border/70 bg-background/60 px-2.5 pt-2.5 pb-1.5 shadow-sm">
+              <AiComposerInput />
+              <div className="mt-1.5 flex min-w-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  title="Attach file or image"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={c.isBusy}
+                  className="shrink-0 rounded-md text-muted-foreground hover:text-foreground"
+                >
+                  <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+                </Button>
+                <div className="shrink-0">
+                  <ContextIndicator messages={helpers.messages} />
+                </div>
+                <AgentSwitcher className="min-w-0 max-w-[7.5rem]" />
+                <span className="min-w-2 flex-1" aria-hidden />
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <ThinkingModeDropdown compact />
+                  <ModelDropdown compact />
+                  {c.voice.supported && c.voice.hasKey && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      title={
+                        c.voice.recording
+                          ? "Stop & transcribe"
+                          : c.voice.transcribing
+                            ? "Transcribing…"
+                            : "Voice input"
+                      }
+                      onClick={() =>
+                        c.voice.recording
+                          ? c.voice.stop()
+                          : void c.voice.start()
+                      }
+                      disabled={c.isBusy || c.voice.transcribing}
+                      className={cn(
+                        "rounded-md text-muted-foreground hover:text-foreground",
+                        c.voice.recording &&
+                          "bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive",
+                      )}
+                    >
+                      {c.voice.recording ? (
+                        <span className="size-2 animate-pulse rounded-full bg-destructive" />
+                      ) : c.voice.transcribing ? (
+                        <Spinner className="size-3" />
+                      ) : (
+                        <HugeiconsIcon
+                          icon={Mic01Icon}
+                          size={13}
+                          strokeWidth={1.75}
+                        />
+                      )}
+                    </Button>
+                  )}
+                  {c.isBusy ? (
+                    <>
+                      {c.canSend && (
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          onClick={c.submit}
+                          className="rounded-md text-muted-foreground hover:text-foreground"
+                          aria-label="Queue message"
+                          title="Queue message (will send after current turn)"
+                        >
+                          <HugeiconsIcon
+                            icon={Queue01Icon}
+                            size={13}
+                            strokeWidth={1.75}
+                          />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        onClick={c.stop}
+                        className="rounded-md"
+                        aria-label="Stop"
+                        title="Stop"
+                      >
+                        <HugeiconsIcon
+                          icon={StopCircleIcon}
+                          size={13}
+                          strokeWidth={1.75}
+                        />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      onClick={c.submit}
+                      disabled={!c.canSend}
+                      className="h-6 w-7 rounded-md"
+                      aria-label="Send"
+                      title="Send (Enter)"
+                    >
+                      <HugeiconsIcon
+                        icon={ArrowRight01Icon}
+                        size={13}
+                        strokeWidth={1.75}
+                      />
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -592,7 +688,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
 
   return (
     <Context usedTokens={used} maxTokens={max} modelId={modelId}>
-      <ContextTrigger className="h-6 shrink-0 gap-0.5 px-0 text-[10.5px]" />
+      <ContextTrigger className="h-6 shrink-0 gap-1 px-1.5 text-[10.5px]" />
       <ContextContent className="w-64 text-[11px]">
         <ContextContentHeader />
         <ContextContentBody>

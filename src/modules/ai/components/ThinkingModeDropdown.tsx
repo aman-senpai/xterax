@@ -21,7 +21,11 @@ import {
 import { getThinkingLevels, supportsThinkingLevel } from "../lib/thinking";
 import { useChatStore } from "../store/chatStore";
 
-export function ThinkingModeDropdown({ compact = false }: { compact?: boolean }) {
+export function ThinkingModeDropdown({
+  compact = false,
+}: {
+  compact?: boolean;
+}) {
   const selectedModelId = useChatStore((s) => s.selectedModelId);
   const level = useChatStore((s) => s.thinkingLevel);
   const setLevel = useChatStore((s) => s.setThinkingLevel);
@@ -45,7 +49,7 @@ export function ThinkingModeDropdown({ compact = false }: { compact?: boolean })
         <Button
           type="button"
           variant="ghost"
-          size={compact ? "icon" : "sm"}
+          size={compact ? "icon-xs" : "sm"}
           disabled={!canThink}
           className={cn(
             "shrink-0 rounded-md hover:bg-accent hover:text-foreground",

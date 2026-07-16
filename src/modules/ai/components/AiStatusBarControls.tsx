@@ -9,7 +9,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AppleIcon,
   ArrowDown01Icon,
@@ -18,15 +18,15 @@ import {
   ComputerIcon,
   CpuIcon,
   DeepseekIcon,
-  FlashIcon,
   FavouriteIcon,
+  FlashIcon,
   GlobeIcon,
   GoogleGeminiIcon,
   Grok02Icon,
   MistralIcon,
   PlugIcon,
-  ServerStack01Icon,
   Search01Icon,
+  ServerStack01Icon,
   Settings01Icon,
   SparklesIcon,
   StarIcon,
@@ -40,15 +40,14 @@ import {
   getModel,
   isCompatModelId,
   MODELS,
-  providerNeedsKey,
-  PROVIDERS,
   type ModelId,
   type ModelInfo,
+  PROVIDERS,
   type ProviderId,
+  providerNeedsKey,
 } from "../config";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -98,9 +97,8 @@ export function AiStatusBarControls() {
 
 // Module-level selectors — stable references to avoid Zustand v5
 // useSyncExternalStore consistency-check re-renders on array/object returns.
-const selectSelectedModelId = (
-  s: ReturnType<typeof useChatStore.getState>,
-) => s.selectedModelId;
+const selectSelectedModelId = (s: ReturnType<typeof useChatStore.getState>) =>
+  s.selectedModelId;
 const selectApiKeys = (s: ReturnType<typeof useChatStore.getState>) =>
   s.apiKeys;
 const selectSetSelectedModelId = (
@@ -230,10 +228,12 @@ export function ModelDropdown({ compact = false }: { compact?: boolean }) {
         <Button
           type="button"
           variant="ghost"
-          size={compact ? "icon" : "sm"}
+          size={compact ? "icon-xs" : "sm"}
           className={cn(
             "shrink-0 rounded-md hover:bg-accent hover:text-foreground",
-            !compact && "my-1 h-5.5 min-w-0 gap-1 overflow-hidden px-1.5 text-xs",
+            compact
+              ? "size-6"
+              : "my-1 h-5.5 min-w-0 gap-1 overflow-hidden px-1.5 text-xs",
             currentProviderHasKey
               ? "text-muted-foreground"
               : "text-amber-600 dark:text-amber-400",
@@ -241,7 +241,7 @@ export function ModelDropdown({ compact = false }: { compact?: boolean }) {
           title={
             currentProviderHasKey
               ? `Model: ${current.label}`
-              : `${current.label} — no key configured`
+              : `${current.label} - no key configured`
           }
         >
           <HugeiconsIcon
