@@ -39,6 +39,65 @@ export type PromptTracker = {
   dispose: () => void;
 };
 
+/**
+ * Used by the renderer pool on column resize: when the user is idle at a
+ * shell-integration prompt, erase the reflowed prompt region before SIGWINCH
+ * so Oh My Zsh / p10k / zle do not stack a second copy on top of it.
+ */
+export type PromptResizeGuard = {
+  /** Absolute buffer line of OSC 133 A, or null when a command is running. */
+  idlePromptLine: () => number | null;
+};
+
+export function createPromptResizeGuard(
+  prompt: PromptTracker,
+  isFgRunning: () => boolean,
+): PromptResizeGuard {
+  return {
+    idlePromptLine: () => {
+      // Use fg-running (OSC 133 C..D), not inCommand: B is true while typing
+      // at the prompt, and we still need to clear the typed line on resize.
+      if (isFgRunning()) return null;
+      const m = prompt.getMarker();
+      if (!m || m.isDisposed) return null;
+      return m.line;
+    },
+  };
+}
+
+/**
+ * CSI to erase from the idle prompt through the end of the viewport.
+ * Returns null when the prompt is scrolled out of view (leave history alone).
+ */
+export function promptClearSeq(
+  markerLine: number,
+  viewportY: number,
+  rows: number,
+): string | null {
+  const row0 = markerLine - viewportY;
+  if (row0 < 0 || row0 >= rows) return null;
+  return `\x1b[${row0 + 1};1H\x1b[J`;
+}
+
+/** Local-only erase (not sent to the PTY). Invokes `then` after the write. */
+export function clearIdlePromptRegion(
+  term: Terminal,
+  markerLine: number,
+  then?: () => void,
+): void {
+  const buf = term.buffer.active;
+  if (buf.type === "alternate") {
+    then?.();
+    return;
+  }
+  const seq = promptClearSeq(markerLine, buf.viewportY, term.rows);
+  if (!seq) {
+    then?.();
+    return;
+  }
+  term.write(seq, then);
+}
+
 export function registerPromptTracker(
   term: Terminal,
   state?: ShellIntegrationState,

@@ -14,6 +14,10 @@ import {
   terminalLineNavigationSequence,
   terminalWordNavigationSequence,
 } from "./keymap";
+import {
+  clearIdlePromptRegion,
+  type PromptResizeGuard,
+} from "./osc-handlers";
 
 export const POOL_MAX_SIZE = 5;
 const FIT_DEBOUNCE_MS = 8;
@@ -54,6 +58,7 @@ export type Slot = {
   retainedLeafId: number | null;
   parked: boolean;
   oscDisposers: (() => void)[];
+  promptGuard: PromptResizeGuard | null;
   observer: ResizeObserver | null;
   fitTimer: ReturnType<typeof setTimeout> | null;
   ptyTimer: ReturnType<typeof setTimeout> | null;
@@ -220,6 +225,7 @@ function createSlot(): Slot {
     retainedLeafId: null,
     parked: false,
     oscDisposers: [],
+    promptGuard: null,
     observer: null,
     fitTimer: null,
     ptyTimer: null,
@@ -379,7 +385,10 @@ export type AcquireParams = {
   searchQuery: string | null;
   cols: number;
   rows: number;
-  registerOsc: (term: Terminal) => (() => void)[];
+  registerOsc: (term: Terminal) => {
+    disposers: (() => void)[];
+    promptGuard: PromptResizeGuard | null;
+  };
   onSearchReady: (addon: SearchAddon) => void;
 };
 
@@ -419,6 +428,44 @@ function discardRetention(slot: Slot): void {
     } catch {}
   }
   slot.oscDisposers = [];
+  slot.promptGuard = null;
+}
+
+/**
+ * Fit to the container. When columns change while idle at an OSC 133 prompt,
+ * erase the reflowed prompt region first so the shell's post-SIGWINCH redraw
+ * does not stack a second copy (classic Oh My Zsh / p10k ghost on panel open).
+ */
+function fitSyncPty(slot: Slot, leafId: number): void {
+  const prevCols = slot.term.cols;
+  const idleLine =
+    slot.term.buffer.active.type === "alternate"
+      ? null
+      : (slot.promptGuard?.idlePromptLine() ?? null);
+
+  slot.fitAddon.fit();
+
+  const colsChanged = slot.term.cols !== prevCols;
+  const needsPty =
+    slot.term.cols !== slot.lastCols || slot.term.rows !== slot.lastRows;
+  if (!needsPty) return;
+
+  // Always push when needsPty was true at fit time. Do not early-return on
+  // last* equality: the async clear path may have a caller (or a later fit)
+  // update last* before this runs, and we still must deliver SIGWINCH.
+  const pushPty = () => {
+    if (slot.currentLeafId !== leafId) return;
+    slot.lastCols = slot.term.cols;
+    slot.lastRows = slot.term.rows;
+    adapter?.resolveLeaf(leafId)?.resizePty(slot.lastCols, slot.lastRows);
+  };
+
+  if (idleLine !== null && colsChanged) {
+    const line = slot.promptGuard?.idlePromptLine() ?? idleLine;
+    clearIdlePromptRegion(slot.term, line, pushPty);
+    return;
+  }
+  pushPty();
 }
 
 function bindSlot(slot: Slot, p: AcquireParams): void {
@@ -483,21 +530,21 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
         d();
       } catch {}
     }
-    slot.oscDisposers = p.registerOsc(slot.term);
+    const osc = p.registerOsc(slot.term);
+    slot.oscDisposers = osc.disposers;
+    slot.promptGuard = osc.promptGuard;
   } else {
     p.drainRing((bytes) => slot.term.write(bytes));
   }
 
   setupResizeObserver(slot, p);
-  slot.fitAddon.fit();
-  slot.lastCols = slot.term.cols;
-  slot.lastRows = slot.term.rows;
+  // Seed last* from the session's remembered PTY size so fitSyncPty can
+  // detect a container-driven change and push SIGWINCH when needed.
+  if (p.cols > 0) slot.lastCols = p.cols;
+  if (p.rows > 0) slot.lastRows = p.rows;
   slot.lastW = p.container.clientWidth;
   slot.lastH = p.container.clientHeight;
-  if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
-    // resizePty updates session.cols/rows + pty backend; no separate scope call.
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
-  }
+  fitSyncPty(slot, p.leafId);
 
   if (!fast && p.searchQuery) {
     try {
@@ -559,14 +606,12 @@ function rewireSlot(slot: Slot, p: AcquireParams): void {
     p.container.appendChild(slot.host);
   }
   setupResizeObserver(slot, p);
-  slot.fitAddon.fit();
   slot.lastW = p.container.clientWidth;
   slot.lastH = p.container.clientHeight;
-  if (slot.term.cols !== p.cols || slot.term.rows !== p.rows) {
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.term.cols, slot.term.rows);
-  }
-  slot.lastCols = slot.term.cols;
-  slot.lastRows = slot.term.rows;
+  // Session still holds pre-rewire dims; fitSyncPty compares against last*.
+  if (p.cols > 0) slot.lastCols = p.cols;
+  if (p.rows > 0) slot.lastRows = p.rows;
+  fitSyncPty(slot, p.leafId);
   p.onSearchReady(slot.searchAddon);
 }
 
@@ -578,15 +623,6 @@ function setupResizeObserver(slot: Slot, p: AcquireParams): void {
   slot.ptyTimer = null;
 
   const container = p.container;
-  const flushPty = () => {
-    slot.ptyTimer = null;
-    if (slot.currentLeafId !== p.leafId) return;
-    if (slot.term.cols === slot.lastCols && slot.term.rows === slot.lastRows)
-      return;
-    slot.lastCols = slot.term.cols;
-    slot.lastRows = slot.term.rows;
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
-  };
 
   slot.observer = new ResizeObserver(() => {
     if (slot.parked) return;
@@ -599,13 +635,10 @@ function setupResizeObserver(slot: Slot, p: AcquireParams): void {
       if (w === slot.lastW && h === slot.lastH) return;
       slot.lastW = w;
       slot.lastH = h;
-      slot.fitAddon.fit();
-      // Send SIGWINCH inline — the outer fit timer (FIT_DEBOUNCE_MS)
-      // already coalesces resize storms. Delaying the PTY resize after
-      // fit() leaves xterm's reflowed buffer out of sync with the shell's
-      // idea of the cursor position, causing prompt duplication when the
-      // shell redraws post-SIGWINCH on top of a reflowed grid.
-      flushPty();
+      // FIT_DEBOUNCE_MS coalesces resize storms (chat panel open, drag).
+      // fitSyncPty clears a reflowed idle prompt before SIGWINCH so the
+      // shell redraw does not stack a second Oh My Zsh / p10k line.
+      fitSyncPty(slot, p.leafId);
     }, FIT_DEBOUNCE_MS);
   });
   slot.observer.observe(container);
@@ -748,6 +781,7 @@ function disposeSlot(slot: Slot): void {
     } catch {}
   }
   slot.oscDisposers = [];
+  slot.promptGuard = null;
   disposeSlotWebgl(slot);
   try {
     slot.term.dispose();
@@ -888,12 +922,7 @@ function refitSlot(slot: Slot): void {
     slot.lastW = -1;
     return;
   }
-  slot.fitAddon.fit();
-  slot.lastCols = slot.term.cols;
-  slot.lastRows = slot.term.rows;
-  adapter
-    ?.resolveLeaf(slot.currentLeafId)
-    ?.resizePty(slot.term.cols, slot.term.rows);
+  fitSyncPty(slot, slot.currentLeafId);
 }
 
 export function applyFontSize(size: number): void {
@@ -996,12 +1025,7 @@ export function refreshLeafSlot(leafId: number): void {
   ) {
     slot.lastW = container.clientWidth;
     slot.lastH = container.clientHeight;
-    slot.fitAddon.fit();
-    if (slot.term.cols !== slot.lastCols || slot.term.rows !== slot.lastRows) {
-      slot.lastCols = slot.term.cols;
-      slot.lastRows = slot.term.rows;
-      adapter?.resolveLeaf(leafId)?.resizePty(slot.lastCols, slot.lastRows);
-    }
+    fitSyncPty(slot, leafId);
   }
   try {
     slot.term.refresh(0, slot.term.rows - 1);

@@ -11,6 +11,7 @@ import {
 import type { BlockMode } from "../block/lib/modeMachine";
 import { DormantRing } from "./dormantRing";
 import {
+  createPromptResizeGuard,
   createShellIntegrationState,
   registerCwdHandler,
   registerPromptTracker,
@@ -594,22 +595,28 @@ function bindLeafToSlot(leafId: number, s: Session): void {
           if (s.blockMode === "prompt") s.inputFocus?.();
         };
         term.textarea?.addEventListener("focus", onGridFocus);
-        return [
-          () => {
-            s.blockDecorations = null;
-            deco.dispose();
-            term.textarea?.removeEventListener("focus", onGridFocus);
-          },
-        ];
+        return {
+          disposers: [
+            () => {
+              s.blockDecorations = null;
+              deco.dispose();
+              term.textarea?.removeEventListener("focus", onGridFocus);
+            },
+          ],
+          // Block mode suppresses the shell prompt; no ghost-prompt risk.
+          promptGuard: null,
+        };
       }
       // Shared in-command flag — see osc-handlers.ts. The prompt tracker
       // flips it on OSC 133 B/C/D/A; the cwd handler reads it to ignore OSC
       // 7 emitted by untrusted command output (remote SSH, `cat` of an
       // attacker file, etc.).
       const shellState = createShellIntegrationState();
-      const prompt = registerPromptTracker(term, shellState, (running) =>
-        onLeafCommandState(leafId, running),
-      );
+      let fgRunning = false;
+      const prompt = registerPromptTracker(term, shellState, (running) => {
+        fgRunning = running;
+        onLeafCommandState(leafId, running);
+      });
       const cwd = registerCwdHandler(
         term,
         (next) => {
@@ -620,7 +627,10 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         },
         shellState,
       );
-      return [prompt.dispose, cwd];
+      return {
+        disposers: [prompt.dispose, cwd],
+        promptGuard: createPromptResizeGuard(prompt, () => fgRunning),
+      };
     },
     onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
   });

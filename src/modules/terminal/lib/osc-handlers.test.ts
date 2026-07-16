@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
 import {
+  createPromptResizeGuard,
   createShellIntegrationState,
+  promptClearSeq,
   registerCwdHandler,
   registerPromptTracker,
 } from "./osc-handlers";
@@ -13,7 +15,7 @@ import {
  */
 type OscHandler = (data: string) => boolean | Promise<boolean>;
 
-function makeFakeTerm() {
+function makeFakeTerm(markerLine = 12) {
   const handlers = new Map<number, OscHandler>();
   const term = {
     parser: {
@@ -22,9 +24,11 @@ function makeFakeTerm() {
         return { dispose: () => handlers.delete(code) };
       },
     },
-    registerMarker: vi
-      .fn()
-      .mockReturnValue({ isDisposed: false, dispose: vi.fn() }),
+    registerMarker: vi.fn().mockReturnValue({
+      line: markerLine,
+      isDisposed: false,
+      dispose: vi.fn(),
+    }),
   } as unknown as Terminal;
   return { term, handlers };
 }
@@ -124,5 +128,53 @@ describe("OSC 133 command-state tracking", () => {
     expect(onCommandState).toHaveBeenLastCalledWith(true);
     handlers.get(133)?.("A");
     expect(onCommandState).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("promptClearSeq — idle-prompt erase on column resize", () => {
+  it("emits CUP + erase-below for a prompt visible in the viewport", () => {
+    // marker at buffer line 20, viewport starts at 10 → screen row 11 (1-based)
+    expect(promptClearSeq(20, 10, 30)).toBe("\x1b[11;1H\x1b[J");
+  });
+
+  it("returns null when the prompt is scrolled above the viewport", () => {
+    expect(promptClearSeq(5, 10, 30)).toBeNull();
+  });
+
+  it("returns null when the marker is below the viewport", () => {
+    expect(promptClearSeq(50, 10, 30)).toBeNull();
+  });
+
+  it("handles a prompt on the first visible row", () => {
+    expect(promptClearSeq(10, 10, 30)).toBe("\x1b[1;1H\x1b[J");
+  });
+});
+
+describe("createPromptResizeGuard", () => {
+  it("exposes the OSC 133 A marker line while idle (including while typing)", () => {
+    const { term, handlers } = makeFakeTerm(42);
+    let fgRunning = false;
+    const prompt = registerPromptTracker(term, undefined, (running) => {
+      fgRunning = running;
+    });
+    const guard = createPromptResizeGuard(prompt, () => fgRunning);
+
+    handlers.get(133)?.("A");
+    handlers.get(133)?.("B"); // typing — still idle for resize purposes
+    expect(guard.idlePromptLine()).toBe(42);
+
+    handlers.get(133)?.("C;ls");
+    expect(guard.idlePromptLine()).toBeNull();
+
+    handlers.get(133)?.("D;0");
+    handlers.get(133)?.("A");
+    expect(guard.idlePromptLine()).toBe(42);
+  });
+
+  it("returns null before any prompt marker exists", () => {
+    const { term } = makeFakeTerm();
+    const prompt = registerPromptTracker(term);
+    const guard = createPromptResizeGuard(prompt, () => false);
+    expect(guard.idlePromptLine()).toBeNull();
   });
 });
