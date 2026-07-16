@@ -16,11 +16,16 @@ import {
 } from "./keymap";
 import {
   clearIdlePromptRegion,
+  clearLastViewportRows,
   type PromptResizeGuard,
 } from "./osc-handlers";
 
 export const POOL_MAX_SIZE = 5;
-const FIT_DEBOUNCE_MS = 8;
+// Chat panel / sidebar open often settles across two layout frames; keep this
+// high enough to coalesce into one fit+SIGWINCH (avoids stacked redraws).
+const FIT_DEBOUNCE_MS = 40;
+// Fallback wipe when OSC 133 A is missing (covers 2-line p10k + slack).
+const IDLE_PROMPT_FALLBACK_ROWS = 4;
 const SNAPSHOT_SCROLLBACK_CAP = 5_000;
 
 export type SlotAdapter = {
@@ -432,27 +437,28 @@ function discardRetention(slot: Slot): void {
 }
 
 /**
- * Fit to the container. When columns change while idle at an OSC 133 prompt,
- * erase the reflowed prompt region first so the shell's post-SIGWINCH redraw
- * does not stack a second copy (classic Oh My Zsh / p10k ghost on panel open).
+ * Fit to the container and sync the PTY.
+ *
+ * Column shrink/grow while idle is the Oh My Zsh / p10k ghost-prompt case:
+ * xterm reflow rearranges the live multi-line prompt, then SIGWINCH makes
+ * the shell redraw with relative cursor math that no longer matches. Order:
+ *   1. Erase the live prompt while shell + terminal still agree on geometry
+ *   2. fit() — reflow history only (prompt cells already blank)
+ *   3. Erase again (marker or last-N fallback) then resizePty / SIGWINCH
+ *
+ * Only wipe when proposeDimensions says columns will change — a no-op fit
+ * must not erase the prompt without a following SIGWINCH redraw.
  */
 function fitSyncPty(slot: Slot, leafId: number): void {
   const prevCols = slot.term.cols;
-  const idleLine =
-    slot.term.buffer.active.type === "alternate"
-      ? null
-      : (slot.promptGuard?.idlePromptLine() ?? null);
+  const isAlt = slot.term.buffer.active.type === "alternate";
+  const guard = slot.promptGuard;
+  const idle = !isAlt && (guard?.isIdle() ?? false);
+  const preMarker = idle ? (guard?.idlePromptLine() ?? null) : null;
+  const proposed = slot.fitAddon.proposeDimensions();
+  const willChangeCols =
+    !!proposed && proposed.cols > 0 && proposed.cols !== prevCols;
 
-  slot.fitAddon.fit();
-
-  const colsChanged = slot.term.cols !== prevCols;
-  const needsPty =
-    slot.term.cols !== slot.lastCols || slot.term.rows !== slot.lastRows;
-  if (!needsPty) return;
-
-  // Always push when needsPty was true at fit time. Do not early-return on
-  // last* equality: the async clear path may have a caller (or a later fit)
-  // update last* before this runs, and we still must deliver SIGWINCH.
   const pushPty = () => {
     if (slot.currentLeafId !== leafId) return;
     slot.lastCols = slot.term.cols;
@@ -460,12 +466,40 @@ function fitSyncPty(slot: Slot, leafId: number): void {
     adapter?.resolveLeaf(leafId)?.resizePty(slot.lastCols, slot.lastRows);
   };
 
-  if (idleLine !== null && colsChanged) {
-    const line = slot.promptGuard?.idlePromptLine() ?? idleLine;
-    clearIdlePromptRegion(slot.term, line, pushPty);
+  const afterFit = () => {
+    if (slot.currentLeafId !== leafId) return;
+
+    slot.fitAddon.fit();
+
+    const colsChanged = slot.term.cols !== prevCols;
+    const needsPty =
+      slot.term.cols !== slot.lastCols || slot.term.rows !== slot.lastRows;
+    if (!needsPty) return;
+
+    // Post-reflow wipe + SIGWINCH only when idle on a column change.
+    if (colsChanged && idle) {
+      const postMarker = guard?.idlePromptLine() ?? preMarker;
+      if (postMarker !== null) {
+        clearIdlePromptRegion(slot.term, postMarker, pushPty);
+        return;
+      }
+      clearLastViewportRows(slot.term, IDLE_PROMPT_FALLBACK_ROWS, pushPty);
+      return;
+    }
+    pushPty();
+  };
+
+  // Wipe BEFORE fit only when columns will change (geometry still matches
+  // the shell's prompt model; reflow would otherwise ghost those cells).
+  if (idle && willChangeCols) {
+    if (preMarker !== null) {
+      clearIdlePromptRegion(slot.term, preMarker, afterFit);
+      return;
+    }
+    clearLastViewportRows(slot.term, IDLE_PROMPT_FALLBACK_ROWS, afterFit);
     return;
   }
-  pushPty();
+  afterFit();
 }
 
 function bindSlot(slot: Slot, p: AcquireParams): void {
@@ -636,8 +670,7 @@ function setupResizeObserver(slot: Slot, p: AcquireParams): void {
       slot.lastW = w;
       slot.lastH = h;
       // FIT_DEBOUNCE_MS coalesces resize storms (chat panel open, drag).
-      // fitSyncPty clears a reflowed idle prompt before SIGWINCH so the
-      // shell redraw does not stack a second Oh My Zsh / p10k line.
+      // fitSyncPty: clear idle prompt → fit → clear → SIGWINCH.
       fitSyncPty(slot, p.leafId);
     }, FIT_DEBOUNCE_MS);
   });

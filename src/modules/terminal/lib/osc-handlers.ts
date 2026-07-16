@@ -40,12 +40,14 @@ export type PromptTracker = {
 };
 
 /**
- * Used by the renderer pool on column resize: when the user is idle at a
- * shell-integration prompt, erase the reflowed prompt region before SIGWINCH
- * so Oh My Zsh / p10k / zle do not stack a second copy on top of it.
+ * Used by the renderer pool on column resize: erase the live prompt before
+ * (and after) xterm reflow so SIGWINCH redraw cannot stack a second Oh My
+ * Zsh / p10k copy on top of reflowed cells.
  */
 export type PromptResizeGuard = {
-  /** Absolute buffer line of OSC 133 A, or null when a command is running. */
+  /** True between commands (not in OSC 133 C..D), including while typing. */
+  isIdle: () => boolean;
+  /** Absolute buffer line of OSC 133 A, or null when busy / no marker yet. */
   idlePromptLine: () => number | null;
 };
 
@@ -54,6 +56,7 @@ export function createPromptResizeGuard(
   isFgRunning: () => boolean,
 ): PromptResizeGuard {
   return {
+    isIdle: () => !isFgRunning(),
     idlePromptLine: () => {
       // Use fg-running (OSC 133 C..D), not inCommand: B is true while typing
       // at the prompt, and we still need to clear the typed line on resize.
@@ -79,6 +82,16 @@ export function promptClearSeq(
   return `\x1b[${row0 + 1};1H\x1b[J`;
 }
 
+/**
+ * CSI to erase the last `n` viewport rows (fallback when OSC 133 A is missing).
+ * Multi-line p10k prompts are typically 2 rows; 4 covers path + gap + PS1.
+ */
+export function lastRowsClearSeq(rows: number, n: number): string | null {
+  if (rows <= 0 || n <= 0) return null;
+  const startRow0 = Math.max(0, rows - n);
+  return `\x1b[${startRow0 + 1};1H\x1b[J`;
+}
+
 /** Local-only erase (not sent to the PTY). Invokes `then` after the write. */
 export function clearIdlePromptRegion(
   term: Terminal,
@@ -91,6 +104,25 @@ export function clearIdlePromptRegion(
     return;
   }
   const seq = promptClearSeq(markerLine, buf.viewportY, term.rows);
+  if (!seq) {
+    then?.();
+    return;
+  }
+  term.write(seq, then);
+}
+
+/** Local-only erase of the bottom `n` viewport rows. */
+export function clearLastViewportRows(
+  term: Terminal,
+  n: number,
+  then?: () => void,
+): void {
+  const buf = term.buffer.active;
+  if (buf.type === "alternate") {
+    then?.();
+    return;
+  }
+  const seq = lastRowsClearSeq(term.rows, n);
   if (!seq) {
     then?.();
     return;

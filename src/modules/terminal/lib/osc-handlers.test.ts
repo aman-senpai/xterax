@@ -3,6 +3,7 @@ import type { Terminal } from "@xterm/xterm";
 import {
   createPromptResizeGuard,
   createShellIntegrationState,
+  lastRowsClearSeq,
   promptClearSeq,
   registerCwdHandler,
   registerPromptTracker,
@@ -150,6 +151,21 @@ describe("promptClearSeq — idle-prompt erase on column resize", () => {
   });
 });
 
+describe("lastRowsClearSeq — fallback wipe without OSC 133 marker", () => {
+  it("erases from rows-n through the end of the viewport", () => {
+    expect(lastRowsClearSeq(30, 4)).toBe("\x1b[27;1H\x1b[J");
+  });
+
+  it("clamps to the full viewport when n exceeds rows", () => {
+    expect(lastRowsClearSeq(3, 10)).toBe("\x1b[1;1H\x1b[J");
+  });
+
+  it("returns null for empty dims", () => {
+    expect(lastRowsClearSeq(0, 4)).toBeNull();
+    expect(lastRowsClearSeq(30, 0)).toBeNull();
+  });
+});
+
 describe("createPromptResizeGuard", () => {
   it("exposes the OSC 133 A marker line while idle (including while typing)", () => {
     const { term, handlers } = makeFakeTerm(42);
@@ -161,20 +177,24 @@ describe("createPromptResizeGuard", () => {
 
     handlers.get(133)?.("A");
     handlers.get(133)?.("B"); // typing — still idle for resize purposes
+    expect(guard.isIdle()).toBe(true);
     expect(guard.idlePromptLine()).toBe(42);
 
     handlers.get(133)?.("C;ls");
+    expect(guard.isIdle()).toBe(false);
     expect(guard.idlePromptLine()).toBeNull();
 
     handlers.get(133)?.("D;0");
     handlers.get(133)?.("A");
+    expect(guard.isIdle()).toBe(true);
     expect(guard.idlePromptLine()).toBe(42);
   });
 
-  it("returns null before any prompt marker exists", () => {
+  it("returns null before any prompt marker exists but still reports idle", () => {
     const { term } = makeFakeTerm();
     const prompt = registerPromptTracker(term);
     const guard = createPromptResizeGuard(prompt, () => false);
+    expect(guard.isIdle()).toBe(true);
     expect(guard.idlePromptLine()).toBeNull();
   });
 });
