@@ -482,13 +482,26 @@ html *::-webkit-scrollbar {
   }
 }
 
-/* Contenteditable placeholder (like a textarea placeholder).
- * Prefer a React-driven overlay when browser :empty is unreliable (<br>).
- * Keep this as a fallback only when data-placeholder is set. */
-[contenteditable="true"][data-placeholder]:empty::before {
-  content: attr(data-placeholder);
-  color: var(--color-muted-foreground, hsl(var(--muted-foreground)));
-  opacity: 0.55;
+/*
+ * AI composer placeholder.
+ *
+ * Do NOT use an absolute React overlay for this text: on WKWebView (Tauri
+ * macOS) translucent absolute text over a translucent card double-paints
+ * glyphs and looks like overlapping characters.
+ *
+ * data-empty is driven by React (browser :empty is unreliable once a <br>
+ * is inserted). float+height:0 keeps the caret at the start without a
+ * second positioned layer.
+ */
+.ai-composer-editor[data-empty="true"]::before {
+  content: "Ask Xterax anything\A /  skills    @  agents & files    #  snippets";
+  white-space: pre;
+  color: var(--color-muted-foreground, var(--muted-foreground));
+  opacity: 0.45;
   pointer-events: none;
-  white-space: pre-wrap;
+  float: left;
+  height: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
 }

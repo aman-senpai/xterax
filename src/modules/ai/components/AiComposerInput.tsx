@@ -542,6 +542,7 @@ export function AiComposerInput() {
               role="textbox"
               aria-multiline
               aria-label="Message Xterax"
+              data-empty={c.value === "" ? "true" : undefined}
               onPaste={handlePaste}
               onInput={() => {
                 const el = editorRef.current;
@@ -640,32 +641,11 @@ export function AiComposerInput() {
                 }
               }}
               className={cn(
-                "min-h-[3.5rem] max-h-40 w-full bg-transparent text-[13px] leading-[1.5] outline-none",
+                "ai-composer-editor min-h-[3.5rem] max-h-40 w-full bg-transparent",
+                "text-[13px] leading-5 text-foreground outline-none",
                 "whitespace-pre-wrap break-words overflow-y-auto",
               )}
             />
-            {c.value === "" && !pickerOpen && (
-              <span
-                className="pointer-events-none absolute inset-x-0 top-0 text-[13px] leading-[1.5] text-muted-foreground/55 select-none"
-                aria-hidden
-              >
-                <span className="block">Ask Xterax anything</span>
-                <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground/45">
-                  <span className="font-medium text-muted-foreground/55">
-                    /
-                  </span>{" "}
-                  skills{"  "}
-                  <span className="font-medium text-muted-foreground/55">
-                    @
-                  </span>{" "}
-                  agents & files{"  "}
-                  <span className="font-medium text-muted-foreground/55">
-                    #
-                  </span>{" "}
-                  snippets
-                </span>
-              </span>
-            )}
           </div>
         </PopoverAnchor>
         <SnippetPickerContent

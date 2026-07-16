@@ -216,7 +216,7 @@ function Body({ sessionId }: { sessionId: string }) {
 
           <TodoStrip sessionId={sessionId} />
 
-          <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2.5">
+          <div className="shrink-0 border-t border-border/60 bg-card px-3 py-2.5">
             <input
               ref={fileInputRef}
               type="file"
@@ -228,7 +228,7 @@ function Body({ sessionId }: { sessionId: string }) {
                 e.target.value = "";
               }}
             />
-            <div className="rounded-xl border border-border/70 bg-background/60 px-2.5 pt-2.5 pb-1.5 shadow-sm">
+            <div className="rounded-xl border border-border/70 bg-background px-2.5 pt-2.5 pb-1.5 shadow-sm">
               <AiComposerInput />
               <div className="mt-1.5 flex min-w-0 items-center gap-0.5">
                 <Button
